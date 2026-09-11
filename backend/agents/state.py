@@ -54,6 +54,7 @@ class DealIntelligenceState(TypedDict):
     human_approved: bool
     human_feedback: Optional[str]
     custom_selected_assets: Optional[List[str]]
+    markdown_export: Optional[str]
 
     # -------------------------------------------------------------
     # 9. AGENT 7 & 8: CXO Final Brief Deliverable

@@ -113,6 +113,7 @@ class HumanApprovalRequest(BaseModel):
     approved: bool
     feedback: Optional[str] = None
     custom_selected_assets: Optional[List[str]] = None
+    service_mappings: Optional[List[ServiceMappingSchema]] = None
 
 
 class DealIntelligenceResponse(BaseModel):
