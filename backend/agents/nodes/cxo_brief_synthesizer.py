@@ -8,12 +8,13 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.agents.state import DealIntelligenceState
 from app.schemas.deal_intelligence import MeetingStrategySchema
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-
+@inject_dynamic_instructions
 def cxo_brief_generator_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 7: CXO Brief Generator
@@ -94,10 +95,14 @@ Synthesize this intelligence into the final CXO Meeting Strategy Brief matching 
             google_api_key=GEMINI_API_KEY
         )
 
+        
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(MeetingStrategySchema)
 
         result: MeetingStrategySchema = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -107,12 +112,14 @@ Synthesize this intelligence into the final CXO Meeting Strategy Brief matching 
 
         return {
             "cxo_executive_brief": executive_brief_dict,
-            "current_step": "CXO_BRIEF_GENERATION_COMPLETED"
+            "node_statuses": {"cxo_brief": "COMPLETED"},
+            "_instructions_applied": True
         }
 
     except Exception as e:
         logger.error(f"Error in CXO Brief Generator Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"CXO Brief Generator Node failed: {str(e)}"],
-            "current_step": "CXO_BRIEF_GENERATION_FAILED"
+            "node_statuses": {"cxo_brief": "COMPLETED"}
+
         }

@@ -9,12 +9,14 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from app.agents.state import DealIntelligenceState
 from app.agents.tools.search_tool import search_web
 from app.schemas.deal_intelligence import StakeholderIntelligenceSchema
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
+@inject_dynamic_instructions
 def stakeholder_intelligence_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 2: Stakeholder Persona Intelligence Agent (Sequential)
@@ -100,10 +102,13 @@ Generate hyper-personalized persona profiles for CEO, CIO, CTO, CDO, CISO, and C
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(StakeholderIntelligenceSchema)
 
         result: StakeholderIntelligenceSchema = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -123,12 +128,13 @@ Generate hyper-personalized persona profiles for CEO, CIO, CTO, CDO, CISO, and C
 
         return {
             "stakeholder_profiles": formatted_stakeholder_profiles,
-            "current_step": "STAKEHOLDER_INTELLIGENCE_COMPLETED"
+            "node_statuses": {"stakeholder_intelligence": "COMPLETED"},
+            "_instructions_applied": True
         }
 
     except Exception as e:
         logger.error(f"Error in Stakeholder Intelligence Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"Stakeholder Intelligence Node failed: {str(e)}"],
-            "current_step": "STAKEHOLDER_INTELLIGENCE_FAILED"
+            "node_statuses": {"stakeholder_intelligence": "FAILED"}
         }

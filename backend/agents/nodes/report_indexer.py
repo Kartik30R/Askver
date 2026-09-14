@@ -21,6 +21,7 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
     meeting_objective = state.get("meeting_objective", "N/A")
 
     cxo_brief = state.get("cxo_executive_brief", {})
+    financial_intelligence = state.get("financial_intelligence", {})
     company_overview = state.get("company_overview", {})
     leadership_team = state.get("leadership_team", [])
     stakeholder_profiles = state.get("stakeholder_profiles", {})
@@ -37,8 +38,34 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
     md_lines.append(f"**Industry:** {target_industry} | **Objective:** {meeting_objective}\n")
     md_lines.append("---")
 
-    # Section 1: Executive Strategy Brief (Node 7)
-    md_lines.append("\n## 1. Executive Strategy Brief")
+    # Section 1: Financial Intelligence (Node 1B)
+    md_lines.append("\n## 1. Financial Intelligence")
+    if financial_intelligence:
+        md_lines.append(f"### Company Financial Status: {financial_intelligence.get('status', 'not_listed').upper()}")
+        md_lines.append(f"- **Ticker:** {financial_intelligence.get('symbol') or 'N/A'}")
+        md_lines.append(f"- **Market:** {financial_intelligence.get('market', 'USA')}")
+        md_lines.append(f"- **Data Source:** {financial_intelligence.get('data_source', 'unavailable')}")
+        overall_score = financial_intelligence.get("financial_score", {}).get("overall_score", 0)
+        md_lines.append(f"- **Overall Financial Score:** {overall_score}/100")
+        for metric in financial_intelligence.get("metric_scores", []):
+            metric_name = metric.get("metric_name", "unknown_metric").replace("_", " ").title()
+            metric_score = metric.get("score", 0)
+            value = metric.get("value")
+            if value is None:
+                metric_value = "unavailable"
+            elif isinstance(value, float):
+                metric_value = f"{value:.2%}"
+            else:
+                metric_value = str(value)
+            md_lines.append(f"- **{metric_name}:** score {metric_score}/100 | value {metric_value}")
+        md_lines.append(f"\n{financial_intelligence.get('ai_summary', 'Financial summary unavailable.')}")
+    else:
+        md_lines.append("Financial intelligence unavailable.")
+
+    md_lines.append("\n---")
+
+    # Section 2: Executive Strategy Brief (Node 7)
+    md_lines.append("\n## 2. Executive Strategy Brief")
     if cxo_brief:
         md_lines.append(f"### Executive Summary\n{cxo_brief.get('executive_summary', 'N/A')}\n")
         md_lines.append(f"### 60-Second Pitch\n> {cxo_brief.get('executive_pitch', 'N/A')}\n")
@@ -173,5 +200,5 @@ def report_indexer_node(state: DealIntelligenceState) -> Dict[str, Any]:
     # Return updated state additions (preserving all state inputs from Nodes 1-7)
     return {
         "markdown_export": markdown_report,
-        "current_step": "REPORT_INDEXING_COMPLETED"
+        "node_statuses": {"report_indexing": "FAILED"}
     }

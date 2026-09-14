@@ -10,12 +10,14 @@ from app.agents.state import DealIntelligenceState
 from app.agents.tools.financial_tool import get_company_financials
 from app.agents.tools.search_tool import search_web, search_news
 from app.schemas.deal_intelligence import CompanyResearchSchema
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
+@inject_dynamic_instructions
 def company_research_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 1: Company Research & Financials Agent
@@ -96,11 +98,14 @@ Synthesize the data into the required structured schema. Make sure every single 
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         # Enforce structured Pydantic output matching CompanyResearchSchema
         structured_llm = llm.with_structured_output(CompanyResearchSchema)
         
         result: CompanyResearchSchema = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -118,12 +123,13 @@ Synthesize the data into the required structured schema. Make sure every single 
             "digital_initiatives": result_dict.get("digital_initiatives", []),
             "technology_investments": result_dict.get("technology_investments", []),
             "recent_news_and_m_and_a": result_dict.get("recent_news_and_m_and_a", []),
-            "current_step": "COMPANY_RESEARCH_COMPLETED"
+            "node_statuses": {"company_research": "COMPLETED"},
+            "_instructions_applied": True
         }
 
     except Exception as e:
         logger.error(f"Error in Company Research Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"Company Research Node failed: {str(e)}"],
-            "current_step": "COMPANY_RESEARCH_FAILED"
+            "node_statuses": {"company_research": "FAILED"}
         }

@@ -25,7 +25,27 @@ class DetailedPoint(BaseModel):
 # AGENT SPECIFIC SCHEMAS
 # ==========================================
 
-# Agent 1: Company Research
+# Agent 1A: Financial Intelligence
+class FinancialMetricScore(BaseModel):
+    metric_name: str
+    value: Optional[Any] = None
+    score: int = Field(default=0, description="0-100 score for the metric")
+    status: str = Field(default="unavailable", description="available, unavailable, not_listed")
+    notes: str = Field(default="", description="Grounded notes from the real data source")
+
+class FinancialIntelligenceSchema(BaseModel):
+    company_name: str
+    symbol: Optional[str] = None
+    status: str = Field(default="not_listed", description="listed, not_listed")
+    market: str = Field(default="USA")
+    availability: str = Field(default="unavailable", description="available or unavailable")
+    data_source: str = Field(default="yfinance")
+    overall_score: int = Field(default=0)
+    ai_summary: str
+    metric_scores: List[FinancialMetricScore]
+
+
+# Agent 1B: Company Research
 class CompanyOverviewSchema(BaseModel):
     profile: DetailedPoint
     business_model: DetailedPoint
@@ -120,7 +140,7 @@ class DealIntelligenceResponse(BaseModel):
     deal_id: UUID
     version: int
     thread_id: str
-    current_step: str
+    node_statuses: Dict[str, str] = Field(default_factory=dict, description="Tracks status per node (e.g., 'company_research': 'COMPLETED')")
     company_research: Optional[CompanyResearchSchema] = None
     stakeholder_intelligence: Optional[StakeholderIntelligenceSchema] = None
     industry_analysis: Optional[IndustryAnalysisSchema] = None

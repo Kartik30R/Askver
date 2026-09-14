@@ -9,12 +9,14 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from app.agents.state import DealIntelligenceState
 from app.schemas.deal_intelligence import BusinessPrioritiesSchema
 from app.services.vector_service import query_client_deal_docs
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
+@inject_dynamic_instructions
 def pain_point_detector_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 4: Pain Point & Priority Detector
@@ -115,10 +117,13 @@ Cross-examine all public and client-provided sources, then synthesize the busine
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(BusinessPrioritiesSchema)
 
         result: BusinessPrioritiesSchema = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -134,12 +139,14 @@ Cross-examine all public and client-provided sources, then synthesize the busine
             "business_priorities": priorities,
             "detected_pain_points": pain_points,
             "matched_client_rfp_chunks": matched_client_rfp_chunks,
-            "current_step": "PAIN_POINT_DETECTION_COMPLETED"
+            "node_statuses": {"pain_point_detection": "COMPLETED"},
+            "_instructions_applied": True
+
         }
 
     except Exception as e:
         logger.error(f"Error in Pain Point Detector Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"Pain Point Detector Node failed: {str(e)}"],
-            "current_step": "PAIN_POINT_DETECTION_FAILED"
+            "node_statuses": {"pain_point_detection": "FAILED"}
         }

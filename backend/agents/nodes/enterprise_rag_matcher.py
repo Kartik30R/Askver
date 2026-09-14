@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.agents.state import DealIntelligenceState
 from app.schemas.deal_intelligence import MatchedAssetSchema
 from app.services.vector_service import query_internal_knowledge_base
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 class AssetExtractionWrapper(BaseModel):
     matched_assets: list[MatchedAssetSchema]
 
+@inject_dynamic_instructions
 def enterprise_rag_matcher_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 5: Enterprise Knowledge RAG Matcher
@@ -83,10 +85,13 @@ Synthesize these raw snippets into a structured list of highly relevant, matched
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(AssetExtractionWrapper)
 
         result: AssetExtractionWrapper = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -95,7 +100,8 @@ Synthesize these raw snippets into a structured list of highly relevant, matched
 
         return {
             "matched_internal_assets": matched_assets,
-            "current_step": "ENTERPRISE_RAG_COMPLETED"
+            "current_step": "ENTERPRISE_RAG_COMPLETED",
+            "_instructions_applied": True
         }
 
     except Exception as e:

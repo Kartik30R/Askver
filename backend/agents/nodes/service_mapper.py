@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.state import DealIntelligenceState
 from app.schemas.deal_intelligence import ServiceMappingSchema
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class ServiceMappingWrapper(BaseModel):
     )
 
 
+@inject_dynamic_instructions
 def service_mapper_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 6: Service Mapping Engine
@@ -77,10 +79,13 @@ Synthesize the pain points and internal proof points into a structured set of se
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(ServiceMappingWrapper)
 
         result: ServiceMappingWrapper = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -90,12 +95,13 @@ Synthesize the pain points and internal proof points into a structured set of se
 
         return {
             "service_mappings": mappings,
-            "current_step": "SERVICE_MAPPING_COMPLETED"
+            "node_statuses": {"service_mapping": "COMPLETED"},
+            "_instructions_applied": True
         }
 
     except Exception as e:
         logger.error(f"Error in Service Mapper Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"Service Mapper Node failed: {str(e)}"],
-            "current_step": "SERVICE_MAPPING_FAILED"
+            "node_statuses": {"service_mapping": "FAILED"}
         }

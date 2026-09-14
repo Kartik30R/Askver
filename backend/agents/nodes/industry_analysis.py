@@ -9,12 +9,14 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from app.agents.state import DealIntelligenceState
 from app.agents.tools.search_tool import search_web, search_news
 from app.schemas.deal_intelligence import IndustryAnalysisSchema
+from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
+@inject_dynamic_instructions
 def industry_analysis_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 3: Industry Intelligence & Compliance Agent
@@ -104,10 +106,13 @@ Synthesize the data into the required structured schema. Ensure every list field
             google_api_key=GEMINI_API_KEY
         )
 
+        # Inject dynamic instructions if present
+        final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
+
         structured_llm = llm.with_structured_output(IndustryAnalysisSchema)
 
         result: IndustryAnalysisSchema = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
 
@@ -117,12 +122,13 @@ Synthesize the data into the required structured schema. Ensure every list field
 
         return {
             "industry_analysis": result_dict,
-            "current_step": "INDUSTRY_ANALYSIS_COMPLETED"
+            "node_statuses": {"industry_analysis": "COMPLETED"},
+            "_instructions_applied": True
         }
 
     except Exception as e:
         logger.error(f"Error in Industry Analysis Node: {str(e)}", exc_info=True)
         return {
             "errors": [f"Industry Analysis Node failed: {str(e)}"],
-            "current_step": "INDUSTRY_ANALYSIS_FAILED"
+            "node_statuses": {"industry_analysis": "FAILED"}
         }

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.db.models.execution_history import ExecutionHistory  # Register model with Base
 
 
 @asynccontextmanager
