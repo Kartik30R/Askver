@@ -14,3 +14,36 @@ ENV/
 .env
 .env.*
 !.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite
+dist/
+.vite/
+
+# Build / coverage
+coverage/
+*.tsbuildinfo
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Optional: local Netlify/Vercel files
+.netlify/
+.vercel/

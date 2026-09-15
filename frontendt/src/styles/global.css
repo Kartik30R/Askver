@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* Base text and background setup */
+    @apply bg-cosmic-bg text-cosmic-text font-sans antialiased min-h-screen selection:bg-nagarro-green selection:text-black;
+    
+    /* Cosmic gradient background overlay */
+    background-image: 
+      radial-gradient(at 40% 20%, hsla(210,100%,10%,1) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, hsla(220,100%,8%,1) 0px, transparent 50%),
+      radial-gradient(at 0% 50%, hsla(200,100%,6%,1) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  /* Use this class for the Deal Intelligence Widgets (Company, Financials, etc.) */
+  .cosmic-card {
+    @apply bg-cosmic-glass backdrop-blur-md border border-cosmic-border rounded-xl shadow-xl overflow-hidden;
+  }
+
+  /* Standardized primary button */
+  .btn-nagarro {
+    @apply bg-nagarro-green text-black font-semibold py-2 px-4 rounded-lg transition-colors duration-200 
+    hover:bg-nagarro-hover focus:outline-none focus:ring-2 focus:ring-nagarro-green focus:ring-opacity-50 
+    disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+}
