@@ -1,9 +1,10 @@
 from uuid import UUID
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+# Import SessionLocal (or your session maker) to create isolated background DB sessions
+from app.core.database import get_db, SessionLocal 
 from app.services.deal_service import DealService
 from app.services.hitl_manager import HITLManager
 from app.schemas.deal_intelligence import HumanApprovalRequest
@@ -17,14 +18,34 @@ from app.schemas.hitl import (
 
 router = APIRouter(prefix="/deals/{deal_id}/pipeline", tags=["Pipeline & HITL"])
 
+# ============================================================================
+# BACKGROUND WORKER
+# ============================================================================
+
+async def run_pipeline_background(deal_id: UUID, thread_id: Optional[str]):
+    """Background worker with an independent DB session lifecycle."""
+    # 1. Create a brand new database session specifically for this background task
+    db = SessionLocal() 
+    try:
+        deal_service = DealService(db)
+        await deal_service.run_deal_intelligence_workflow(
+            deal_id=deal_id, 
+            thread_id=thread_id
+        )
+    except Exception as e:
+        print(f"Background pipeline execution failed for deal {deal_id}: {str(e)}")
+    finally:
+        # 2. Ensure the background session is closed when the workflow finishes
+        db.close()
 
 # ============================================================================
-# EXISTING ENDPOINTS (Backward Compatible)
+# ENDPOINTS
 # ============================================================================
 
-@router.post("/trigger")
+@router.post("/trigger", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_pipeline(
-    deal_id: UUID, 
+    deal_id: UUID,
+    background_tasks: BackgroundTasks,
     thread_id: Optional[str] = None, 
     db: Session = Depends(get_db)
 ):
@@ -32,16 +53,21 @@ async def trigger_pipeline(
     Starts or resumes the LangGraph agent state machine (Nodes 1–6).
     """
     deal_service = DealService(db)
-    try:
-        result = await deal_service.run_deal_intelligence_workflow(
-            deal_id=deal_id, 
-            thread_id=thread_id
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Pipeline execution failed: {str(e)}")
+    
+    # 1. Fast synchronous check using the request-scoped DB session
+    deal = deal_service.get_deal(deal_id)
+    if not deal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+
+    # 2. Queue the heavy workflow execution (DO NOT pass 'db' here)
+    background_tasks.add_task(run_pipeline_background, deal_id, thread_id)
+    
+    # 3. Immediately return success to the client
+    return {
+        "status": "processing",
+        "message": f"Pipeline execution queued for deal {deal_id}.",
+        "thread_id": thread_id
+    }
 
 
 @router.get("/status")

@@ -43,7 +43,7 @@ class DocumentService:
         with open(file_path, "wb") as f:
             f.write(content)
 
-        vector_collection_name = f"deal_{deal_id}"
+        vector_collection_name = f"deal_{deal_id}_docs"
         file_type = file.filename.split(".")[-1].lower() if "." in file.filename else "unknown"
 
         # 2. Register document metadata in PostgreSQL

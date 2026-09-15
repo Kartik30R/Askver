@@ -13,6 +13,12 @@ def append_instructions(existing: Optional[List[str]], new: Optional[List[str]])
         existing.extend(new)
     return existing if existing else None
 
+def merge_statuses(left: Dict[str, str], right: Dict[str, str]) -> Dict[str, str]:
+    merged = left.copy() if left else {}
+    if right:
+        merged.update(right)
+    return merged
+
 
 class DealIntelligenceState(TypedDict):
     # =====================================================================

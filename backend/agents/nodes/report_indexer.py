@@ -200,5 +200,5 @@ def report_indexer_node(state: DealIntelligenceState) -> Dict[str, Any]:
     # Return updated state additions (preserving all state inputs from Nodes 1-7)
     return {
         "markdown_export": markdown_report,
-        "node_statuses": {"report_indexing": "FAILED"}
+        "node_statuses": {"report_indexing": "COMPLETED"}
     }
