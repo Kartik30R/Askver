@@ -1,23 +1,25 @@
-import os
-import json
 import logging
+import json
 from typing import Dict, Any
+
+from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from backend.agents.state import DealIntelligenceState
+from backend.app.core.config import settings
+from backend.app.services.vector_service import query_internal_knowledge_base
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.agents.state import DealIntelligenceState
-from app.schemas.deal_intelligence import MatchedAssetSchema
-from app.services.vector_service import query_internal_knowledge_base
-from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
+# FIXED: Updated import path to match the new schema locations
+from backend.app.schemas.node_5_6_services import MatchedAssetSchema
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 class AssetExtractionWrapper(BaseModel):
     matched_assets: list[MatchedAssetSchema]
+
 
 @inject_dynamic_instructions
 def enterprise_rag_matcher_node(state: DealIntelligenceState) -> Dict[str, Any]:
@@ -27,17 +29,18 @@ def enterprise_rag_matcher_node(state: DealIntelligenceState) -> Dict[str, Any]:
     vector store to find highly relevant Case Studies, Proposals, and SoWs.
     """
     target_industry = state.get("target_industry", "")
-    detected_pain_points = state.get("detected_pain_points", [])
+    priorities_and_pain_points = state.get("priorities_and_pain_points")
+    
+    pain_points = priorities_and_pain_points.pain_points if priorities_and_pain_points else []
 
     logger.info(f"Starting Enterprise RAG Matcher Node for industry: {target_industry}")
 
     raw_retrieved_assets = []
 
     # Query PGVector based on the specific pain points identified in Node 4
-    for point in detected_pain_points:
-        query_text = f"{point.get('category', '')}: {point.get('description', '')}"
+    for point in pain_points:
+        query_text = f"{point.category}: {point.description}"
         
-        # Pull top 3 matching internal case studies/proposals for this specific pain point
         results = query_internal_knowledge_base(
             query=query_text,
             industry_filter=target_industry if target_industry else None,
@@ -45,7 +48,6 @@ def enterprise_rag_matcher_node(state: DealIntelligenceState) -> Dict[str, Any]:
         )
         raw_retrieved_assets.extend(results)
 
-    # Deduplicate raw retrieved assets by vector_doc_id or content
     unique_assets = {}
     for asset in raw_retrieved_assets:
         content = asset.get("content", "")
@@ -56,21 +58,20 @@ def enterprise_rag_matcher_node(state: DealIntelligenceState) -> Dict[str, Any]:
         logger.warning("No internal assets matched the deal requirements.")
         return {
             "matched_internal_assets": [],
-            "current_step": "ENTERPRISE_RAG_COMPLETED"
+            "node_statuses": {"enterprise_rag": "COMPLETED"}
         }
 
-    # Use LLM to evaluate the relevance of the retrieved chunks and format them cleanly
     system_prompt = """You are an Enterprise Solutions Architect.
 YOUR GOAL: Review the raw snippets retrieved from the company's internal knowledge base and extract the most relevant case studies, proposals, and success stories that solve the client's detected pain points.
 
 RULES:
 1. Only return assets that explicitly demonstrate resolving a problem the client has.
-2. For each asset, extract the 'key_metrics_achieved' (e.g., 'Reduced costs by 20%', 'Launched in 3 months') if present in the text.
+2. For each asset, extract the 'key_metrics_achieved' if present in the text.
 3. Provide a concise 'summary' of how the asset proves our capability."""
 
     human_message_content = f"""
 DETECTED CLIENT PAIN POINTS:
-{json.dumps(detected_pain_points, indent=2)}
+{json.dumps([p.model_dump() for p in pain_points], indent=2)}
 
 RAW INTERNAL KNOWLEDGE BASE SNIPPETS RETRIEVED:
 {json.dumps(list(unique_assets.values()), indent=2)}
@@ -82,12 +83,10 @@ Synthesize these raw snippets into a structured list of highly relevant, matched
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
             temperature=0.1,
-            google_api_key=GEMINI_API_KEY
+            google_api_key=settings.GEMINI_API_KEY
         )
 
-        # Inject dynamic instructions if present
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
-
         structured_llm = llm.with_structured_output(AssetExtractionWrapper)
 
         result: AssetExtractionWrapper = structured_llm.invoke([
@@ -95,12 +94,11 @@ Synthesize these raw snippets into a structured list of highly relevant, matched
             HumanMessage(content=human_message_content)
         ])
 
-        matched_assets = [asset.model_dump() for asset in result.matched_assets]
-        logger.info(f"Successfully matched {len(matched_assets)} internal assets.")
+        logger.info(f"Successfully matched {len(result.matched_assets)} internal assets.")
 
         return {
-            "matched_internal_assets": matched_assets,
-            "current_step": "ENTERPRISE_RAG_COMPLETED",
+            "matched_internal_assets": result.matched_assets,
+            "node_statuses": {"enterprise_rag": "COMPLETED"},
             "_instructions_applied": True
         }
 
@@ -108,5 +106,5 @@ Synthesize these raw snippets into a structured list of highly relevant, matched
         logger.error(f"Error in Enterprise RAG Matcher Node: {str(e)}")
         return {
             "errors": [f"Enterprise RAG Matcher failed: {str(e)}"],
-            "current_step": "ENTERPRISE_RAG_FAILED"
+            "node_statuses": {"enterprise_rag": "FAILED"}
         }

@@ -1,21 +1,21 @@
 import logging
 from langgraph.graph import StateGraph, START, END
+
+from app.core.config import settings
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from app.agents.state import DealIntelligenceState
-from app.core.config import settings
-
 # Import node implementations
-from app.agents.nodes.company_research import company_research_node
-from app.agents.nodes.financial_intelligence import financial_intelligence_node
-from app.agents.nodes.stakeholder_intelligence import stakeholder_intelligence_node
-from app.agents.nodes.industry_analysis import industry_analysis_node
-from app.agents.nodes.pain_point_detector import pain_point_detector_node
-from app.agents.nodes.enterprise_rag_matcher import enterprise_rag_matcher_node
-from app.agents.nodes.service_mapper import service_mapper_node
-from app.agents.nodes.human_review_gate import human_review_gate_node, route_human_review
-from app.agents.nodes.cxo_brief_synthesizer import cxo_brief_generator_node
-from app.agents.nodes.report_indexer import report_indexer_node
+from backend.agents.nodes.financial_intelligence import financial_intelligence_node
+from backend.agents.nodes.stakeholder_intelligence import stakeholder_intelligence_node
+from backend.agents.nodes.industry_analysis import industry_analysis_node
+from backend.agents.nodes.pain_point_detector import pain_point_detector_node
+from backend.agents.nodes.enterprise_rag_matcher import enterprise_rag_matcher_node
+from backend.agents.nodes.service_mapper import service_mapper_node
+from backend.agents.nodes.human_review_gate import human_review_gate_node, route_human_review
+from backend.agents.nodes.cxo_brief_synthesizer import cxo_brief_generator_node
+from backend.agents.nodes.report_indexer import report_indexer_node
+from backend.agents.nodes.company_research import company_research_node
+from backend.agents.state import DealIntelligenceState
 
 logger = logging.getLogger(__name__)
 

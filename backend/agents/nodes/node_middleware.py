@@ -7,7 +7,8 @@ import logging
 from typing import Dict, Any, Callable, Optional
 from functools import wraps
 
-from app.agents.state import DealIntelligenceState
+from backend.agents.state import DealIntelligenceState
+
 
 logger = logging.getLogger(__name__)
 

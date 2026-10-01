@@ -1,28 +1,32 @@
-import os
-import json
 import logging
-from typing import Dict, Any, List
+import json
+from typing import Dict, Any
+
+from backend.agents.nodes.node_middleware import (
+    apply_instruction_context_to_prompt, 
+    get_injection_context, 
+    inject_dynamic_instructions
+)
+from backend.app.core.config import settings  # Assuming settings export
+from backend.agents.tools.financial_tool import get_company_financials
+from backend.agents.tools.search_tool import search_news, search_web
+
+# Import the state and strict Pydantic schema exactly as defined in your architecture
+from app.agents.state import DealIntelligenceState
+from backend.app.schemas.node_1_company import CompanyResearchSchema
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from app.agents.state import DealIntelligenceState
-from app.agents.tools.financial_tool import get_company_financials
-from app.agents.tools.search_tool import search_web, search_news
-from app.schemas.deal_intelligence import CompanyResearchSchema
-from app.agents.node_middleware import inject_dynamic_instructions, get_injection_context, apply_instruction_context_to_prompt
-
 logger = logging.getLogger(__name__)
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+GEMINI_API_KEY = settings.GEMINI_API_KEY
 
 
 @inject_dynamic_instructions
 def company_research_node(state: DealIntelligenceState) -> Dict[str, Any]:
     """
     Agent 1: Company Research & Financials Agent
-    Performs 5-tier intelligence collection (Financials, Business Model, Tech Stack,
-    Leadership, and Real-Time News/M&A) and generates structured JSON output.
+    Performs 5-tier intelligence collection and generates a unified CompanyResearchSchema.
     """
     target_company = state.get("target_company", "")
     target_industry = state.get("target_industry", "")
@@ -53,7 +57,6 @@ def company_research_node(state: DealIntelligenceState) -> Dict[str, Any]:
     query_news = f"{target_company} acquisition merger strategic partnership product launch latest news"
     news_results = search_news(query_news, max_results=5)
 
-    # Consolidate raw search context for the LLM
     raw_context = {
         "financial_summary": financial_data,
         "overview_sources": overview_results,
@@ -98,33 +101,27 @@ Synthesize the data into the required structured schema. Make sure every single 
             google_api_key=GEMINI_API_KEY
         )
 
-        # Inject dynamic instructions if present
+        # Inject dynamic instructions via middleware mapping
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))
 
         # Enforce structured Pydantic output matching CompanyResearchSchema
         structured_llm = llm.with_structured_output(CompanyResearchSchema)
         
+        # Invoke the chain; 'result' is strictly validated against CompanyResearchSchema
         result: CompanyResearchSchema = structured_llm.invoke([
             SystemMessage(content=final_system_prompt),
             HumanMessage(content=human_message_content)
         ])
-
-        # Convert Pydantic object to Dict format for LangGraph state persistence
-        result_dict = result.model_dump()
 
         logger.info(f"Successfully completed Company Research Node for {target_company}")
 
         # =========================================================================
         # 3. RETURN UPDATED LANGGRAPH STATE
         # =========================================================================
+        # Return maps exactly to DealIntelligenceState structure
         return {
-            "company_overview": result_dict.get("overview", {}),
-            "leadership_team": result_dict.get("leadership_team", []),
-            "digital_initiatives": result_dict.get("digital_initiatives", []),
-            "technology_investments": result_dict.get("technology_investments", []),
-            "recent_news_and_m_and_a": result_dict.get("recent_news_and_m_and_a", []),
-            "node_statuses": {"company_research": "COMPLETED"},
-            "_instructions_applied": True
+            "company_research": result, 
+            "node_statuses": {"company_research": "COMPLETED"}
         }
 
     except Exception as e:

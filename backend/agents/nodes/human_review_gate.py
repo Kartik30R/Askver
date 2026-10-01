@@ -1,9 +1,23 @@
 import logging
 from typing import Dict, Any, List
 
-from app.agents.state import DealIntelligenceState
+from backend.agents.state import DealIntelligenceState
 
 logger = logging.getLogger(__name__)
+
+
+def _get_val(obj: Any, key: str, default: Any = None) -> Any:
+    """Safely gets a value from either a dictionary or a Pydantic model attribute."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+def _set_val(obj: Any, key: str, value: Any):
+    """Safely sets a value on either a dictionary or a Pydantic model attribute."""
+    if isinstance(obj, dict):
+        obj[key] = value
+    else:
+        setattr(obj, key, value)
 
 
 def human_review_gate_node(state: DealIntelligenceState) -> Dict[str, Any]:
@@ -38,7 +52,7 @@ def human_review_gate_node(state: DealIntelligenceState) -> Dict[str, Any]:
     if custom_selected_assets:
         filtered_assets = [
             asset for asset in matched_internal_assets
-            if asset.get("asset_id") in custom_selected_assets or asset.get("asset_name") in custom_selected_assets
+            if str(_get_val(asset, "asset_id")) in custom_selected_assets or _get_val(asset, "asset_name") in custom_selected_assets
         ]
         logger.info(f"Applied custom asset selection filter: {len(filtered_assets)} assets retained out of {len(matched_internal_assets)}.")
 
@@ -46,11 +60,13 @@ def human_review_gate_node(state: DealIntelligenceState) -> Dict[str, Any]:
     updated_mappings = service_mappings
     if custom_selected_assets:
         for mapping in updated_mappings:
-            if "supporting_proof_assets" in mapping:
-                mapping["supporting_proof_assets"] = [
-                    asset for asset in mapping["supporting_proof_assets"]
-                    if asset.get("asset_id") in custom_selected_assets or asset.get("asset_name") in custom_selected_assets
+            proof_assets = _get_val(mapping, "supporting_proof_assets")
+            if proof_assets is not None:
+                filtered_proofs = [
+                    asset for asset in proof_assets
+                    if str(_get_val(asset, "asset_id")) in custom_selected_assets or _get_val(asset, "asset_name") in custom_selected_assets
                 ]
+                _set_val(mapping, "supporting_proof_assets", filtered_proofs)
 
     logger.info(f"Human review approved for deal '{deal_id}'. Advancing to CXO Brief Generator.")
 
