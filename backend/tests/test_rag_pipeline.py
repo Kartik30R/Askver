@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from app.services import chat_service, vector_service
+from app.services.deal_service import DealService
 from app.services.document_parser import parse_and_chunk_document
 from app.services.hitl_manager import HITLManager
+from app.schemas.hitl import WorkflowStateSnapshot
 from agents.graph import route_after_review_decision
 from agents.state import append_errors, append_instructions
+from agents.tools import financial_tool
 from agents.tools.search_tool import search_news
 from app.utils.checkpoint_serialization import get_allowed_msgpack_modules
 
@@ -96,11 +99,52 @@ def test_append_instructions_reducer_behavior():
     assert append_instructions(["a"], []) is None
 
 
+def test_workflow_state_accepts_targeted_instruction_objects():
+    payload = {
+        "deal_id": "deal-123",
+        "dynamic_instructions": [
+            {"text": "Focus on expansion markets", "target_nodes": ["service_mapper"]},
+            "Keep the executive brief concise",
+        ],
+        "target_nodes": ["service_mapper"],
+        "rerun_from_node": "service_mapper",
+    }
+
+    state = WorkflowStateSnapshot.model_validate(payload)
+
+    assert state.dynamic_instructions[0]["text"] == "Focus on expansion markets"
+    assert state.target_nodes == ["service_mapper"]
+    assert state.rerun_from_node == "service_mapper"
+
+
 def test_append_errors_handles_none_existing_list():
     assert append_errors(None, ["node failed"]) == ["node failed"]
     assert append_errors(["a"], None) == ["a"]
     assert append_errors(None, None) is None
     assert append_errors(["a"], ["b", "c"]) == ["a", "b", "c"]
+
+
+def test_deal_service_hydrates_rerun_state_before_node_execution():
+    state = {
+        "target_company": "Acme",
+        "target_industry": "Industrial software",
+        "meeting_objective": "Find AI use cases",
+        "priorities_and_pain_points": {
+            "priorities": [],
+            "pain_points": [{
+                "title": "fragmented data",
+                "description": "customer data is fragmented",
+                "impact": "slows decisions",
+                "category": "data",
+            }],
+        },
+        "matched_internal_assets": [],
+    }
+
+    hydrated = DealService._hydrate_run_state_static(state)
+
+    assert hasattr(hydrated["priorities_and_pain_points"], "pain_points")
+    assert hydrated["priorities_and_pain_points"].pain_points[0].title == "fragmented data"
 
 
 def test_route_after_review_decision_handles_pending_review_without_error():
@@ -150,6 +194,31 @@ def test_approve_text_edit_updates_report_snapshot_for_active_version():
         assert saved.get("snapshot_data", {}).get("markdown_export") == "Updated executive brief"
 
     asyncio.run(run_test())
+
+
+def test_get_company_financials_uses_actual_exchange_from_yahoo(monkeypatch):
+    class DummyTicker:
+        info = {
+            "longName": "Reliance Industries",
+            "marketCap": 200_000_000_000,
+            "currency": "INR",
+            "exchange": "NSE",
+            "fullExchangeName": "National Stock Exchange of India",
+            "totalRevenue": 1_000_000_000,
+            "revenueGrowth": 0.12,
+            "grossMargins": 0.38,
+            "operatingMargins": 0.18,
+            "ebitda": 200_000_000,
+            "freeCashflow": 150_000_000,
+        }
+
+    monkeypatch.setattr("agents.tools.financial_tool.resolve_company_symbol", lambda query: "RELIANCE.NS")
+    monkeypatch.setattr("agents.tools.financial_tool.yf.Ticker", lambda symbol: DummyTicker())
+
+    result = financial_tool.get_company_financials("Reliance Industries")
+
+    assert result["market"] == "NSE"
+    assert "NSE" in result["ai_summary"]
 
 
 def test_search_news_uses_direct_web_search_first(monkeypatch):

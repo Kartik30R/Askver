@@ -462,15 +462,38 @@ class HITLManager:
     # 1. Dynamic steering ------------------------------------------------------
     async def submit_dynamic_instruction(self, deal_id: UUID, request: DynamicInstructionRequest) -> Dict[str, Any]:
         deal = await self._deal(deal_id)
-        if deal.status not in ("PAUSED", "AWAITING_REVIEW"):
-            raise InvalidWorkflowState(
-                f"Instructions can be added while PAUSED or AWAITING_REVIEW (status={deal.status}). Pause first.")
         config = await self._config(deal_id)
-        await self._patch_state(config, {"dynamic_instructions": list(request.instructions or [])})
-        await self._mirror(deal_id, config)
+
+        target_nodes = list(request.target_nodes or [])
+        if request.apply_to_node and not target_nodes:
+            target_nodes = [request.apply_to_node]
+
+        # Keep rerun selection independent from the actual instruction target list.
+        # The rerun node controls where the workflow resumes; target_nodes controls
+        # which downstream nodes should receive the instruction payload.
+        formatted_instructions = [
+            {"text": instruction, "target_nodes": target_nodes or ["*"]}
+            for instruction in request.instructions or []
+        ]
+        patch: Dict[str, Any] = {
+            "dynamic_instructions": formatted_instructions,
+            "target_nodes": target_nodes or None,
+            "rerun_from_node": request.rerun_from_node,
+            "current_step": "INSTRUCTION_QUEUED",
+        }
+        await self._patch_state(config, patch)
+        await self.deal_repo.update_deal_status(deal_id, "RUNNING")
+        await self._mirror(deal_id, config, "INSTRUCTION_QUEUED")
         n = len(request.instructions or [])
-        return {"success": True, "message": f"Queued {n} instructions for the next node",
-                "execution_paused": True, "instructions_queued": n}
+        return {
+            "success": True,
+            "message": f"Queued {n} instructions for the selected node(s)",
+            "execution_paused": False,
+            "instructions_queued": n,
+            "target_nodes": target_nodes,
+            "rerun_from_node": request.rerun_from_node,
+            "should_run": bool(request.rerun_from_node),
+        }
 
     # 2. Pause / resume --------------------------------------------------------
     async def request_manual_pause(self, deal_id: UUID, request: ManualPauseRequest) -> Dict[str, Any]:
@@ -488,7 +511,10 @@ class HITLManager:
         config = await self._config(deal_id)
         patch: Dict[str, Any] = {"last_execution_resumption": _now()}
         if request.instructions:
-            patch["dynamic_instructions"] = list(request.instructions)
+            patch["dynamic_instructions"] = [
+                {"text": instruction, "target_nodes": ["*"]}
+                for instruction in request.instructions
+            ]
         if request.feedback:
             patch["human_feedback"] = request.feedback
         await self._patch_state(config, patch)
@@ -520,8 +546,12 @@ class HITLManager:
         if request.executive_brief_modifications:
             # The brief doesn't exist yet; pass the edits to the CXO node as steering instructions.
             patch["dynamic_instructions"] = [
-                "Reviewer edits to apply to the executive brief: "
-                + json.dumps(request.executive_brief_modifications, default=str)]
+                {
+                    "text": "Reviewer edits to apply to the executive brief: "
+                    + json.dumps(request.executive_brief_modifications, default=str),
+                    "target_nodes": ["cxo_brief_generator"],
+                }
+            ]
 
         await graph.aupdate_state(config, patch, as_node="service_mapper")   # next node stays mandatory_review
 

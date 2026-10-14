@@ -36,6 +36,14 @@ export type MandatoryReviewApprovalPayload = {
   executive_brief_modifications?: Record<string, unknown> | null
 }
 
+export type DynamicInstructionPayload = {
+  instructions: string[]
+  apply_to_node?: string | null
+  target_nodes?: string[] | null
+  rerun_from_node?: string | null
+  priority?: number
+}
+
 export type ExecutionCheckpoint = {
   checkpoint_id: string
   node_name?: string | null
@@ -115,6 +123,21 @@ export async function submitMandatoryReviewApproval(
 ): Promise<{ success: boolean; message: string; status?: string; should_run?: boolean }> {
   return fetchWithAuth<{ success: boolean; message: string; status?: string; should_run?: boolean }>(
     `/deals/${dealId}/pipeline/hitl/mandatory-review/approve`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      accessToken: accessToken ?? undefined,
+    },
+  )
+}
+
+export async function submitDynamicInstruction(
+  dealId: string,
+  payload: DynamicInstructionPayload,
+  accessToken?: string | null,
+): Promise<{ success: boolean; message: string; should_run?: boolean; target_nodes?: string[] | null; rerun_from_node?: string | null }> {
+  return fetchWithAuth<{ success: boolean; message: string; should_run?: boolean; target_nodes?: string[] | null; rerun_from_node?: string | null }>(
+    `/deals/${dealId}/pipeline/hitl/dynamic-instruction`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

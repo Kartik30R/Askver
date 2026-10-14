@@ -2586,7 +2586,14 @@ export default function DealDashboard() {
       {/* ========================================================================================= */}
       {/* VS CODE-STYLE RIGHT SIDE DRAWER (HITL DYNAMIC INSTRUCTION & STEERING) */}
       {/* ========================================================================================= */}
-      {isDrawerOpen && <HITLDrawer nodes={nodes} onClose={() => setIsDrawerOpen(false)} />}
+      {isDrawerOpen && (
+        <HITLDrawer
+          dealId={dealId ?? ''}
+          nodes={nodes}
+          onClose={() => setIsDrawerOpen(false)}
+          onInstructionSubmitted={() => void loadPipelineState()}
+        />
+      )}
     </div>
   )
 }

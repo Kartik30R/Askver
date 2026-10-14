@@ -13,75 +13,80 @@ from agents.state import DealIntelligenceState
 logger = logging.getLogger(__name__)
 
 
+def _normalize_instruction_entries(instructions):
+    normalized = []
+    for entry in instructions or []:
+        if isinstance(entry, str):
+            normalized.append({"text": entry, "target_nodes": []})
+        elif isinstance(entry, dict):
+            text = entry.get("text") or entry.get("instruction") or entry.get("message")
+            if text is None:
+                continue
+            targets = entry.get("target_nodes") or entry.get("nodes") or entry.get("targets") or []
+            if isinstance(targets, str):
+                targets = [targets]
+            normalized.append({"text": str(text), "target_nodes": list(targets)})
+    return normalized
+
+
+def _extract_matching_instructions(instructions, node_name: str):
+    matches = []
+    for entry in _normalize_instruction_entries(instructions):
+        targets = entry.get("target_nodes") or []
+        if not targets or node_name in targets or "*" in targets:
+            matches.append(entry["text"])
+    return matches
+
+
+def _strip_applied_instructions(existing, applied):
+    remaining = []
+    applied_texts = set(applied or [])
+    for entry in _normalize_instruction_entries(existing):
+        text = entry["text"]
+        if text in applied_texts:
+            continue
+        remaining.append(entry)
+    if not remaining:
+        return []
+    return [item["text"] if not item["target_nodes"] else {"text": item["text"], "target_nodes": item["target_nodes"]} for item in remaining]
+
+
 def inject_dynamic_instructions(node_func: Callable) -> Callable:
     """
     Decorator that wraps a node function to inject dynamic instructions into LLM context.
-    
-    Before the node executes, any pending dynamic_instructions in state are extracted
-    and appended to the system prompt / context used by the node's LLM calls.
-    
-    Usage:
-        @inject_dynamic_instructions
-        def my_node(state: DealIntelligenceState) -> Dict[str, Any]:
-            ...
     """
     @wraps(node_func)
     def wrapper(state: DealIntelligenceState) -> Dict[str, Any]:
         node_name = node_func.__name__.replace("_node", "")
-        dynamic_instructions = state.get("dynamic_instructions")
-        logger.info("[pipeline][node_start] %s | instructions=%d", node_name, len(dynamic_instructions or []))
+        dynamic_instructions = state.get("dynamic_instructions") or []
+        logger.info("[pipeline][node_start] %s | instructions=%d", node_name, len(dynamic_instructions))
 
-        # Extract and log dynamic instructions
-        if dynamic_instructions:
+        matching_instructions = _extract_matching_instructions(dynamic_instructions, node_name)
+        if matching_instructions:
             logger.info(
-                f"[{node_name}] Injecting {len(dynamic_instructions)} dynamic instruction(s) "
+                f"[{node_name}] Injecting {len(matching_instructions)} dynamic instruction(s) "
                 f"into node context"
             )
-            
-            # Store instructions in a format accessible to the node
-            # The node should check for this key and prepend to its LLM prompt
-            state["_injected_instructions"] = dynamic_instructions
+            state["_injected_instructions"] = matching_instructions
             state["_instructions_applied"] = True
-            
-            # Log each instruction for audit purposes
-            for i, instruction in enumerate(dynamic_instructions, 1):
+            for i, instruction in enumerate(matching_instructions, 1):
                 logger.debug(f"[{node_name}] Instruction {i}: {instruction}")
-        
-        # Call the actual node function
+        else:
+            state["_injected_instructions"] = []
+            state.pop("_instructions_applied", None)
+
         result = node_func(state)
         logger.info("[pipeline][node_complete] %s | node_statuses=%s | result_keys=%s", node_name, result.get("node_statuses"), list(result.keys()))
 
-        # Determine whether instructions were applied. Prefer explicit node echo,
-        # but fall back to middleware-injected state markers so nodes don't have to
-        # echo the flag back to middleware.
-        injected = state.get("_injected_instructions")
-        applied_count = None
+        injected = state.get("_injected_instructions") or []
+        if injected:
+            remaining = _strip_applied_instructions(dynamic_instructions, injected)
+            result["dynamic_instructions"] = remaining
+            result["_instructions_applied"] = True
+            logger.info(f"[{node_name}] Cleared applied dynamic instructions after injection (count={len(injected)})")
 
-        # Priority 1: node explicitly signalled application
-        if result.get("_instructions_applied"):
-            applied_count = len(dynamic_instructions) if dynamic_instructions else 0
-
-        # Priority 2: middleware set a state marker before calling the node
-        elif state.get("_instructions_applied"):
-            applied_count = len(injected) if injected else 0
-
-        # Priority 3: if injected instructions exist but no markers, assume applied
-        elif injected:
-            applied_count = len(injected)
-
-        # If we detected any application, clear instructions and set a lightweight
-        # flag. Do NOT write into `node_statuses` here — that field is reserved
-        # for node completion status and should be set by the node itself.
-        if applied_count is not None:
-            if applied_count > 0:
-                # Clear the dynamic instructions in the returned state and mark applied
-                result["dynamic_instructions"] = []
-                result["_instructions_applied"] = True
-                logger.info(f"[{node_name}] Cleared dynamic instructions after application (count={applied_count})")
-            # If applied_count == 0, we do not set `_instructions_applied`.
-        
         return result
-    
+
     return wrapper
 
 

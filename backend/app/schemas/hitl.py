@@ -1,8 +1,8 @@
 """
 Schemas for Human-In-The-Loop (HITL) operations in the deal intelligence workflow.
 """
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -16,16 +16,24 @@ class CheckpointStatus(str, Enum):
 
 class DynamicInstructionRequest(BaseModel):
     """
-    Submits real-time steering instructions to update the active node's execution.
+    Submits real-time steering instructions to update a node or set of nodes.
     These instructions are appended to the node's current LLM prompt context.
     """
     instructions: List[str] = Field(
         ..., 
-        description="List of instructions to inject into the active node's LLM prompt"
+        description="List of instructions to inject into the target node(s)"
     )
     apply_to_node: Optional[str] = Field(
         None,
-        description="Specific node name to apply instructions to. If None, applies to current node."
+        description="Specific node name to apply instructions to. Deprecated alias for target_nodes when only one node is selected."
+    )
+    target_nodes: Optional[List[str]] = Field(
+        default=None,
+        description="Specific node names that this instruction should apply to. If omitted, it applies to all nodes."
+    )
+    rerun_from_node: Optional[str] = Field(
+        default=None,
+        description="Resume the workflow from this node after injecting the instruction."
     )
     priority: int = Field(
         default=1,
@@ -101,7 +109,9 @@ class WorkflowStateSnapshot(BaseModel):
     last_execution_resumption: Optional[str] = None
     pause_requested: bool = False
     manual_pause_at_node: Optional[str] = None
-    dynamic_instructions: Optional[List[str]] = None
+    dynamic_instructions: Optional[List[Union[str, Dict[str, Any]]]] = None
+    target_nodes: Optional[List[str]] = None
+    rerun_from_node: Optional[str] = None
     mandatory_review_checkpoint: str = "pending"
     human_approved: bool = False
     human_feedback: Optional[str] = None
@@ -121,6 +131,28 @@ class WorkflowStateSnapshot(BaseModel):
 
     node_statuses: Optional[Dict[str, Any]] = None
     errors: Optional[List[Any]] = None
+
+    @field_validator("dynamic_instructions", mode="before")
+    @classmethod
+    def normalize_dynamic_instructions(cls, value):
+        if value is None:
+            return None
+        normalized = []
+        for entry in value:
+            if isinstance(entry, str):
+                normalized.append(entry)
+                continue
+            if isinstance(entry, dict):
+                text = entry.get("text") or entry.get("instruction") or entry.get("message")
+                if text is None:
+                    continue
+                targets = entry.get("target_nodes") or entry.get("nodes") or entry.get("targets") or []
+                if isinstance(targets, str):
+                    targets = [targets]
+                normalized.append({"text": str(text), "target_nodes": list(targets)})
+                continue
+            normalized.append(entry)
+        return normalized
 
 class HITLEventMessage(BaseModel):
     """

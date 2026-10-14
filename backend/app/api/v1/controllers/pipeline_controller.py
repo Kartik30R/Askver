@@ -146,6 +146,7 @@ async def submit_human_approval(
 async def submit_dynamic_instruction(
     deal_id: UUID,
     instruction_request: DynamicInstructionRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -168,6 +169,12 @@ async def submit_dynamic_instruction(
     hitl_manager = HITLManager(db)
     try:
         result = await hitl_manager.submit_dynamic_instruction(deal_id, instruction_request)
+        if result.get("should_run"):
+            if instruction_request.rerun_from_node:
+                deal_service = DealService(db)
+                await deal_service.run_pipeline_from_node(deal_id, instruction_request.rerun_from_node)
+            else:
+                background_tasks.add_task(run_pipeline_background, deal_id, None)
         return result
     except InvalidWorkflowState as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

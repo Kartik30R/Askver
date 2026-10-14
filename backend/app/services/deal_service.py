@@ -10,10 +10,20 @@ from app.repositories.deal_intelligence_repository import DealIntelligenceReposi
 from app.repositories.execution_history_repository import ExecutionHistoryRepository
 from app.schemas.deal_intelligence import HumanApprovalRequest
 from agents.graph import get_deal_intelligence_graph
+from agents.nodes.company_research import company_research_node
+from agents.nodes.cxo_brief_synthesizer import cxo_brief_generator_node
+from agents.nodes.enterprise_rag_matcher import enterprise_rag_matcher_node
+from agents.nodes.financial_intelligence import financial_intelligence_node
+from agents.nodes.industry_analysis import industry_analysis_node
+from agents.nodes.pain_point_detector import pain_point_detector_node
+from agents.nodes.report_indexer import report_indexer_node
+from agents.nodes.service_mapper import service_mapper_node
+from agents.nodes.stakeholder_intelligence import stakeholder_intelligence_node
 from app.services.hitl_manager import HITLManager
 from app.services.execution_history_service import ExecutionHistoryService
 from app.schemas.deals import DealCreate
 from app.utils.serializers import to_primitive
+from agents.graph import _hydrate
 
 logger = logging.getLogger(__name__)
 
@@ -78,32 +88,39 @@ class DealService:
         deal = await self.deal_repo.get_deal_by_id(deal_id)
         if not deal:
             raise ValueError(f"Deal {deal_id} not found")
-    
+
         latest = await self.intel_repo.get_latest_intelligence_snapshot(deal_id)
+        rerun_from = None
+        if latest and latest.snapshot_data:
+            rerun_from = latest.snapshot_data.get("rerun_from_node")
+
+        if rerun_from:
+            return await self.run_pipeline_from_node(deal_id, rerun_from, thread_id=latest.thread_id if latest else None)
+
         tid = latest.thread_id if latest else f"deal_{deal_id}"
         graph = get_deal_intelligence_graph()
         config = {"configurable": {"thread_id": tid}, "recursion_limit": 50}
-    
+
         existing = await graph.aget_state(config)
-        if existing.next:                       # interrupted / failed / paused -> continue from checkpoint
+        if existing.next:
             graph_input = None
         else:
-            if existing.values:                 # previous run finished -> fresh thread
+            if existing.values:
                 tid = f"deal_{deal_id}_{uuid4().hex[:8]}"
                 config = {"configurable": {"thread_id": tid}, "recursion_limit": 50}
             graph_input = self._initial_state(deal)
             await self._persist(deal_id, tid, graph_input)
-    
+
         await self.deal_repo.update_deal_status(deal_id, "RUNNING")
         values: dict = {}
         try:
             async with aclosing(graph.astream(graph_input, config=config, stream_mode="values")) as stream:
-                async for values in stream:                       # full state after every step
+                async for values in stream:
                     await self._persist(deal_id, tid, values)
                     await self.db.refresh(deal)
                     if deal.status == "PAUSE_REQUESTED":
                         break
-                    
+
             final = await graph.aget_state(config)
             vals = to_primitive(dict(final.values or values))
             if "mandatory_review" in final.next:
@@ -131,6 +148,110 @@ class DealService:
             await self._persist(deal_id, tid, v, final="FAILED")
             await self.deal_repo.update_deal_status(deal_id, "FAILED")
             raise
+
+    def _hydrate_run_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        return _hydrate(state)
+
+    async def run_pipeline_from_node(self, deal_id: UUID, node_name: str, thread_id: Optional[str] = None):
+        deal = await self.deal_repo.get_deal_by_id(deal_id)
+        if not deal:
+            raise ValueError(f"Deal {deal_id} not found")
+
+        latest = await self.intel_repo.get_latest_intelligence_snapshot(deal_id)
+        state = dict((latest.snapshot_data or {}) if latest else {})
+        state.setdefault("deal_id", str(deal.id))
+        state.setdefault("target_company", deal.target_company)
+        state.setdefault("target_industry", deal.target_industry)
+        state.setdefault("meeting_objective", deal.meeting_objective)
+        state["current_step"] = f"RUNNING: {node_name}"
+        state["rerun_from_node"] = None
+
+        node_order = [
+            "company_research",
+            "financial_intelligence",
+            "stakeholder_intel",
+            "industry_analysis",
+            "pain_point_detector",
+            "enterprise_rag_matcher",
+            "service_mapper",
+            "mandatory_review",
+            "cxo_brief_generator",
+            "report_indexer",
+        ]
+        if node_name not in node_order:
+            raise ValueError(f"Unknown rerun node: {node_name}")
+
+        start_index = node_order.index(node_name)
+        prior_statuses = dict((state.get("node_statuses") or {}).items())
+        for name in node_order:
+            if name in node_order[start_index:]:
+                prior_statuses.pop(name, None)
+            else:
+                prior_statuses[name] = prior_statuses.get(name) or "COMPLETED"
+        state["node_statuses"] = prior_statuses
+
+        for name in node_order[start_index:]:
+            state.setdefault("node_statuses", {})
+            state["node_statuses"].pop(name, None)
+            if name in state:
+                state.pop(name, None)
+
+            node_fn = {
+                "company_research": company_research_node,
+                "financial_intelligence": financial_intelligence_node,
+                "stakeholder_intel": stakeholder_intelligence_node,
+                "industry_analysis": industry_analysis_node,
+                "pain_point_detector": pain_point_detector_node,
+                "enterprise_rag_matcher": enterprise_rag_matcher_node,
+                "service_mapper": service_mapper_node,
+                "mandatory_review": None,
+                "cxo_brief_generator": cxo_brief_generator_node,
+                "report_indexer": report_indexer_node,
+            }.get(name)
+
+            if node_fn is None:
+                if name == "mandatory_review":
+                    state["mandatory_review_checkpoint"] = state.get("mandatory_review_checkpoint", "pending")
+                    state["node_statuses"][name] = "AWAITING_REVIEW"
+                    state["current_step"] = "MANDATORY_REVIEW_CHECKPOINT"
+                    await self._persist(deal_id, thread_id or (latest.thread_id if latest else f"deal_{deal_id}"), state, final="AWAITING_REVIEW")
+                    await self.deal_repo.update_deal_status(deal_id, "AWAITING_REVIEW")
+                    return state
+                continue
+
+            try:
+                hydrated_state = self._hydrate_run_state(state)
+                update = dict(node_fn(hydrated_state) or {})
+                for key, value in update.items():
+                    if not key.startswith("_"):
+                        state[key] = value
+                state["node_statuses"] = {**state.get("node_statuses", {}), **(update.get("node_statuses") or {})}
+                state["current_step"] = f"RUNNING: {name}"
+                await self._persist(deal_id, thread_id or (latest.thread_id if latest else f"deal_{deal_id}"), state)
+                await self.db.refresh(deal)
+                if deal.status == "PAUSE_REQUESTED":
+                    break
+            except Exception as exc:
+                logger.exception("Rerun-from-node failed at %s for deal %s", name, deal_id)
+                state.setdefault("errors", [])
+                state["errors"] = list(state.get("errors") or []) + [f"{name}: {exc}"]
+                state["node_statuses"][name] = "FAILED"
+                await self._persist(deal_id, thread_id or (latest.thread_id if latest else f"deal_{deal_id}"), state, final="FAILED")
+                await self.deal_repo.update_deal_status(deal_id, "FAILED")
+                raise
+
+        if state.get("mandatory_review_checkpoint") == "rejected":
+            status = "REJECTED"
+        elif state.get("node_statuses", {}).get("mandatory_review") == "AWAITING_REVIEW":
+            status = "AWAITING_REVIEW"
+        elif any(v == "FAILED" for v in (state.get("node_statuses") or {}).values()):
+            status = "FAILED"
+        else:
+            status = "COMPLETED"
+
+        await self._persist(deal_id, thread_id or (latest.thread_id if latest else f"deal_{deal_id}"), state, final=status)
+        await self.deal_repo.update_deal_status(deal_id, status)
+        return state
     def _initial_state(self, deal) -> dict:
         return {
             "deal_id": str(deal.id), "target_company": deal.target_company,
@@ -139,120 +260,6 @@ class DealService:
             "human_approved": False, "node_statuses": {}, "current_step": "STARTED",
         }
     
-    # async def _persist(self, deal_id, thread_id, graph, config):
-    #     snap = await graph.aget_state(config)
-    #     data = to_primitive(dict(snap.values or {}))
-    #     statuses = dict(data.get("node_statuses") or {})
-    #     for n in snap.next:                                   # nodes about to run / waiting
-    #         statuses[n] = "AWAITING_REVIEW" if n == "mandatory_review" else "RUNNING"
-    #     data["node_statuses"] = statuses
-    #     if "mandatory_review" in snap.next:
-    #         data["current_step"] = "MANDATORY_REVIEW_CHECKPOINT"
-    #     elif snap.next:
-    #         data["current_step"] = "RUNNING: " + ", ".join(snap.next)
-    #     await self.intel_repo.save_intelligence_snapshot(
-    #         deal_id=deal_id, thread_id=thread_id,
-    #         current_step=data.get("current_step") or "EXECUTING", snapshot_data=data)
-    #     return snap
-    
-    # async def run_deal_intelligence_workflow(self, deal_id: UUID, thread_id: Optional[str] = None):
-    #     deal = await self.deal_repo.get_deal_by_id(deal_id)
-    #     if not deal:
-    #         raise ValueError(f"Deal {deal_id} not found")
-    
-    #     latest = await self.intel_repo.get_latest_intelligence_snapshot(deal_id)
-    #     tid = latest.thread_id if latest else f"deal_{deal_id}"      # never trust a client-supplied "1"
-    #     graph = get_deal_intelligence_graph()
-    #     config = {"configurable": {"thread_id": tid}, "recursion_limit": 50}
-    
-    #     existing = await graph.aget_state(config)
-    #     if existing.next:                       # interrupted / failed mid-run -> CONTINUE from checkpoint
-    #         graph_input = None
-    #     else:                                   # new run (or previous run finished) -> fresh thread
-    #         if existing.values:
-    #             tid = f"deal_{deal_id}_{uuid4().hex[:8]}"
-    #             config = {"configurable": {"thread_id": tid}, "recursion_limit": 50}
-    #         graph_input = self._initial_state(deal)
-    #         init = {**graph_input, "node_statuses": {"company_research": "RUNNING"},
-    #                 "current_step": "RUNNING: company_research"}
-    #         await self.intel_repo.save_intelligence_snapshot(
-    #             deal_id=deal_id, thread_id=tid, current_step=init["current_step"], snapshot_data=init)
-    
-    #     await self.deal_repo.update_deal_status(deal_id, "RUNNING")
-    #     try:
-    #         async for _ in graph.astream(graph_input, config=config, stream_mode="updates"):
-    #             await self._persist(deal_id, tid, graph, config)     # DB updated after every node
-    
-    #         final = await self._persist(deal_id, tid, graph, config)
-    #         vals = final.values or {}
-    #         if "mandatory_review" in final.next:
-    #             status = "AWAITING_REVIEW"
-    #         elif final.next:
-    #             status = "PAUSED"
-    #         elif vals.get("mandatory_review_checkpoint") == "rejected":
-    #             status = "REJECTED"
-    #         else:
-    #             status = "COMPLETED"
-    #         await self.deal_repo.update_deal_status(deal_id, status)
-    #         return to_primitive(vals)
-    #     except Exception as e:
-    #         logger.exception("Workflow failed for deal %s", deal_id)
-    #         await self.deal_repo.update_deal_status(deal_id, "FAILED")
-    #         await self.intel_repo.save_intelligence_snapshot(
-    #             deal_id=deal_id, thread_id=tid, current_step="FAILED",
-    #             snapshot_data={**to_primitive(dict((await graph.aget_state(config)).values or {})),
-    #                            "current_step": "FAILED", "errors": [str(e)]})
-    #         raise
-        
-    # async def apply_review_decision(self, deal_id: UUID, patch: dict):
-    #     """Write the human decision into the graph's own state. The caller then enqueues run_deal_intelligence_workflow."""
-    #     latest = await self.intel_repo.get_latest_intelligence_snapshot(deal_id)
-    #     if not latest:
-    #         raise ValueError(f"No workflow for deal {deal_id}")
-    #     config = {"configurable": {"thread_id": latest.thread_id}}
-    #     await get_deal_intelligence_graph().aupdate_state(config, patch)
-    # async def submit_human_approval(self, deal_id: UUID, approval_request: HumanApprovalRequest):
-    #     """
-    #     Legacy endpoint interface. Handles resume state patching for human feedback.
-    #     """
-    #     logger.warning(
-    #         f"Using legacy submit_human_approval endpoint. "
-    #         f"Consider migrating to /hitl/mandatory-review/approve."
-    #     )
-
-    #     latest_snapshot = await self.intel_repo.get_latest_intelligence_snapshot(deal_id)
-    #     if not latest_snapshot:
-    #         raise ValueError(f"No snapshot found for deal {deal_id}")
-
-    #     thread_id = latest_snapshot.thread_id
-    #     config = {"configurable": {"thread_id": thread_id}}
-    #     graph = get_deal_intelligence_graph()
-
-    #     resume_state_patch = {
-    #         "human_approved": approval_request.approved,
-    #         "human_feedback": approval_request.feedback,
-    #         "custom_selected_assets": approval_request.custom_selected_assets or [],
-    #         "service_mappings": approval_request.service_mappings or [],
-    #         "current_step": "HUMAN_REVIEW_SUBMITTED",
-    #         "mandatory_review_checkpoint": "approved" if approval_request.approved else "pending",
-    #     }
-
-    #     await self.deal_repo.update_deal_status(deal_id, "RUNNING")
-    #     final_state = await graph.ainvoke(resume_state_patch, config=config)
-
-    #     current_step = final_state.get("current_step", "COMPLETED")
-    #     await self.deal_repo.update_deal_status(deal_id, "COMPLETED" if "COMPLETED" in current_step else "PAUSED")
-
-    #     serial_state = to_primitive(final_state)
-
-    #     await self.intel_repo.save_intelligence_snapshot(
-    #         deal_id=deal_id,
-    #         thread_id=thread_id,
-    #         current_step=current_step,
-    #         snapshot_data=serial_state,
-    #     )
-    #     return serial_state
-
     async def get_deal(self, deal_id: UUID):
         return await self.deal_repo.get_deal_by_id(deal_id)
 

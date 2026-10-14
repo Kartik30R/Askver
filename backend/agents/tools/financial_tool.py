@@ -603,10 +603,12 @@ def _build_summary(
     company_name: str,
     status: str,
     details: Dict[str, Any],
+    market: Optional[str] = None,
 ) -> str:
 
     score = details.get("overall_score", 0)
     coverage = details.get("score_coverage", 0)
+    market_label = market or "public market"
 
     if status == "private":
         return (
@@ -621,7 +623,7 @@ def _build_summary(
         )
 
     return (
-        f"{company_name} has a U.S.-listed public profile with "
+        f"{company_name} has a public listing on {market_label} with "
         f"a financial quality score of {score}/100. "
         f"The scoring framework has {coverage}% data coverage."
     )
@@ -667,6 +669,7 @@ def get_company_financials(
 
             company_name = info.get("longName") or info.get("shortName") or query
             market_cap = _safe_float(info.get("marketCap"))
+            market_name = (info.get("exchange") or info.get("fullExchangeName") or info.get("market") or "Public market").strip()
 
             # Core financial scores based on ratios
             details = _build_metric_scores(info)
@@ -689,7 +692,7 @@ def get_company_financials(
                 "company_name": company_name,
                 "symbol": resolved_symbol,
                 "status": "listed",
-                "market": "USA",
+                "market": market_name,
                 "market_cap": market_cap,
                 "market_cap_category": classify_market_cap(market_cap),
                 "currency": info.get("currency", "USD"),
@@ -711,6 +714,7 @@ def get_company_financials(
                 company_name,
                 "listed",
                 details,
+                market_name,
             )
 
             return combined_details
@@ -731,7 +735,7 @@ def get_company_financials(
             "company_name": query,
             "symbol": None,
             "status": "private",
-            "market": "USA",
+            "market": "Public market",
             "market_cap": None,
             "market_cap_category": "Unknown",
             "raw_metrics": {},  # Keep consistent structure
@@ -763,7 +767,7 @@ def get_company_financials(
         "company_name": query,
         "symbol": None,
         "status": "private_or_unverified" if sec_reference else "private",
-        "market": "USA",
+        "market": "Public market",
         "market_cap": None,
         "market_cap_category": "Unknown",
         "raw_metrics": {},
