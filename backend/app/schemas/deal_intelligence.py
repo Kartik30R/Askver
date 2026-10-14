@@ -3,13 +3,13 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from uuid import UUID
 
-from backend.app.schemas.node_1_company import CompanyResearchSchema
-from backend.app.schemas.node_1b_financial import FinancialIntelligenceSchema
-from backend.app.schemas.node_2_stakeholder import StakeholderIntelligenceSchema
-from backend.app.schemas.node_3_industry import IndustryAnalysisSchema
-from backend.app.schemas.node_4_priorities import BusinessPrioritiesSchema
-from backend.app.schemas.node_5_6_services import MatchedAssetSchema, ServiceMappingSchema
-from backend.app.schemas.node_7_brief import CXOExecutiveBriefSchema
+from app.schemas.node_1_company import CompanyResearchSchema
+from app.schemas.node_1b_financial import FinancialIntelligenceSchema
+from app.schemas.node_2_stakeholder import StakeholderIntelligenceSchema
+from app.schemas.node_3_industry import IndustryAnalysisSchema
+from app.schemas.node_4_priorities import BusinessPrioritiesSchema
+from app.schemas.node_5_6_services import MatchedAssetSchema, ServiceMappingSchema
+from app.schemas.node_7_brief import CXOExecutiveBriefSchema
 
 
 class PipelineTriggerResponse(BaseModel):

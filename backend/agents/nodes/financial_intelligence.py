@@ -1,17 +1,18 @@
 import logging
 import json
 from typing import Dict, Any
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
-from backend.agents.state import DealIntelligenceState
-from backend.agents.tools.financial_tool import build_private_company_search_queries, get_company_financials
-from backend.agents.tools.search_tool import search_news, search_web
-from backend.app.core.config import settings
+from app.services.llm_provider import get_llm
+
+from agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from agents.tools.financial_tool import build_private_company_search_queries, get_company_financials
+from app.core.config import settings
 
 # Import strict schema
-from backend.app.schemas.node_1b_financial import FinancialIntelligenceSchema
+from app.schemas.node_1b_financial import FinancialIntelligenceSchema
+from agents.state import DealIntelligenceState
+from agents.tools.search_tool import search_news, search_web
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +55,17 @@ STRICT GUARDRAILS:
     human_prompt = f"""
 TARGET COMPANY: {target_company}
 TARGET INDUSTRY: {target_industry}
-RAW FINANCIAL DATA: {json.dumps(financial_raw, indent=2)}
-PRIVATE RESEARCH CONTEXT: {json.dumps(search_context, indent=2)}
+RAW FINANCIAL DATA: {json.dumps(financial_raw, separators=(',', ':'), default=str)}
+PRIVATE RESEARCH CONTEXT: {json.dumps(search_context, separators=(',', ':'), default=str)}
 
 Synthesize the data into the requested schema. Make sure to extract metrics, assign relative scores, and identify financial concerns.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-2.0-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.0,
-            google_api_key=settings.GEMINI_API_KEY
         )
         
         # Apply dynamic instructions

@@ -3,8 +3,8 @@ from typing import Dict, Any
 
 from langchain_core.documents import Document
 
-from backend.app.services.vector_service import index_client_deal_chunks
-from backend.agents.state import DealIntelligenceState
+from app.services.vector_service import index_documents_to_collection
+from agents.state import DealIntelligenceState
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,8 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
     priorities = _safe_dump(state.get("priorities_and_pain_points"))
     
     # Lists of Pydantic models
-    matched_assets = [_safe_dump(a) for a in state.get("matched_internal_assets", [])]
-    service_mappings = [_safe_dump(sm) for sm in state.get("service_mappings", [])]
-
+    matched_assets = [_safe_dump(a) for a in (state.get("matched_internal_assets") or [])]
+    service_mappings = [_safe_dump(sm) for sm in (state.get("service_mappings") or [])]
     md_lines = []
 
     # Document Header
@@ -44,15 +43,29 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
     md_lines.append(f"**Industry:** {target_industry} | **Objective:** {meeting_objective}\n")
     md_lines.append("---")
 
-    # Section 1: Financial Intelligence
+       # Section 1: Financial Intelligence
     md_lines.append("\n## 1. Financial Intelligence")
     if financial_intel:
-        md_lines.append(f"### Company Financial Status: {financial_intel.get('status', 'not_listed').upper()}")
+        md_lines.append(
+            f"### Company Financial Status: "
+            f"{financial_intel.get('status', 'not_listed').upper()}"
+        )
         md_lines.append(f"- **Ticker:** {financial_intel.get('symbol') or 'N/A'}")
         md_lines.append(f"- **Market:** {financial_intel.get('market', 'USA')}")
-        overall_score = financial_intel.get("financial_score", {}).get("overall_score", 0)
-        md_lines.append(f"- **Overall Financial Score:** {overall_score}/100")
-        md_lines.append(f"\n{financial_intel.get('ai_summary', 'Financial summary unavailable.')}")
+        md_lines.append(
+            f"- **Overall Financial Score:** "
+            f"{financial_intel.get('overall_score_10', 'N/A')}"
+        )
+        md_lines.append(
+            f"- **Market Cap Tier:** "
+            f"{financial_intel.get('market_cap_category', 'Unknown')}"
+        )
+        md_lines.append(
+            f"\n{financial_intel.get('ai_summary', 'Financial summary unavailable.')}"
+        )
+
+        for c in financial_intel.get("financial_concerns") or []:
+            md_lines.append(f"- ⚠ {c}")
     else:
         md_lines.append("Financial intelligence unavailable.")
 
@@ -139,37 +152,27 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
 
     # ACCESSED: Section 5 - Industry Analysis & Regulatory Environment (Node 3)
     md_lines.append("\n## 5. Industry Trends & Compliance Drivers")
+
     if industry_analysis:
-        trends = industry_analysis.get("industry_trends", industry_analysis.get("trends", []))
-        regulations = industry_analysis.get("regulatory_pressures", industry_analysis.get("compliance_mandates", []))
-        overview = industry_analysis.get("industry_overview", "")
-
-        if overview:
-            md_lines.append(f"{overview}\n")
-
-        if trends:
-            md_lines.append("### Industry Trends & Disruption")
-            for t in trends:
-                md_lines.append(f"- {t}")
-
-        if regulations:
-            md_lines.append("\n### Regulatory & Compliance Mandates")
-            for r in regulations:
-                md_lines.append(f"- {r}")
-
-        # Dynamic fallback if keys are structured differently
-        if not trends and not regulations and not overview:
-            for key, val in industry_analysis.items():
-                if isinstance(val, list):
-                    md_lines.append(f"### {key.replace('_', ' ').title()}")
-                    for item in val:
-                        md_lines.append(f"- {item}")
-                elif isinstance(val, str):
-                    md_lines.append(f"**{key.replace('_', ' ').title()}:** {val}")
+        for key, title in (
+            ("major_trends", "Industry Trends & Disruption"),
+            ("regulatory_compliance", "Regulatory & Compliance Mandates"),
+            ("risks_and_challenges", "Risks & Challenges"),
+            ("technology_benchmarks", "Technology Benchmarks"),
+        ):
+            items = industry_analysis.get(key) or []
+            if items:
+                md_lines.append(f"\n### {title}")
+                for p in items:
+                    md_lines.append(
+                        f"- **{p.get('headline', '')}**: "
+                        f"{p.get('detailed_narrative', '')}"
+                    )
     else:
         md_lines.append("Industry analysis unavailable.")
 
     md_lines.append("\n---")
+
 
     # Section 6: Stakeholder Persona Intelligence (Node 2)
     md_lines.append("\n## 6. Stakeholder Persona Intelligence")
@@ -202,13 +205,23 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
     # Section 7: Target Company Background & Leadership (Node 1)
     md_lines.append("\n## 7. Target Company Background")
     if company_research:
-        profile = company_research.get("profile", {})
-        if isinstance(profile, dict) and profile:
-            md_lines.append(f"{profile.get('detailed_narrative', '')}\n")
-        elif isinstance(company_research.get("detailed_narrative"), str):
-            md_lines.append(f"{company_research.get('detailed_narrative', '')}\n")
-    
-        leadership_team = company_research.get("leadership_team", [])
+        overview = company_research.get("overview") or {}
+
+        for key, label in (
+            ("summary", "Summary"),
+            ("business_model", "Business Model"),
+        ):
+            p = overview.get(key) or {}
+            if p:
+                md_lines.append(
+                    f"**{label}:** {p.get('headline', '')}. "
+                    f"{p.get('detailed_narrative', '')}\n"
+                )
+
+        if overview.get("headquarters"):
+            md_lines.append(f"**Headquarters:** {overview['headquarters']}\n")
+
+        leadership_team = company_research.get("leadership_team") or []
         if leadership_team:
             md_lines.append("### Identified Executive Leadership")
             for leader in leadership_team:
@@ -216,7 +229,6 @@ def generate_markdown_report(state: DealIntelligenceState) -> str:
                 role = leader.get("Role", leader.get("role", "N/A"))
                 bg = leader.get("Key Background", leader.get("background", ""))
                 md_lines.append(f"- **{name}** ({role}): {bg}")
-
     return "\n".join(md_lines)
 
 
@@ -244,8 +256,8 @@ def report_indexer_node(state: DealIntelligenceState) -> Dict[str, Any]:
             }
         )
         try:
-            index_client_deal_chunks(deal_id=deal_id, chunks=[report_document])
-            logger.info(f"Successfully indexed final report to PGVector for deal {deal_id}")
+            index_documents_to_collection(f"deal_{deal_id}_reports", [report_document], pre_delete_collection=False)
+            logger.info(f"Successfully indexed final report to collection deal_{deal_id}_reports")
         except Exception as e:
             logger.error(f"Failed to index final report to vector store: {str(e)}")
 

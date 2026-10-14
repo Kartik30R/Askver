@@ -2,17 +2,17 @@ import logging
 import json
 from typing import Dict, Any
 
-from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
-from backend.agents.state import DealIntelligenceState
-from backend.app.core.config import settings
-from backend.app.services.vector_service import query_internal_knowledge_base
+from agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from agents.state import DealIntelligenceState
+from app.core.config import settings
+from app.services.llm_provider import get_llm
+from app.services.vector_service import query_internal_knowledge_base
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel
 
 # FIXED: Updated import path to match the new schema locations
-from backend.app.schemas.node_5_6_services import MatchedAssetSchema
+from app.schemas.node_5_6_services import MatchedAssetSchema
 
 logger = logging.getLogger(__name__)
 
@@ -71,19 +71,19 @@ RULES:
 
     human_message_content = f"""
 DETECTED CLIENT PAIN POINTS:
-{json.dumps([p.model_dump() for p in pain_points], indent=2)}
+{json.dumps([p.model_dump() for p in pain_points], separators=(',', ':'), default=str)}
 
 RAW INTERNAL KNOWLEDGE BASE SNIPPETS RETRIEVED:
-{json.dumps(list(unique_assets.values()), indent=2)}
+{json.dumps(list(unique_assets.values()), separators=(',', ':'), default=str)}
 
 Synthesize these raw snippets into a structured list of highly relevant, matched assets.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-2.5-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.1,
-            google_api_key=settings.GEMINI_API_KEY
         )
 
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))

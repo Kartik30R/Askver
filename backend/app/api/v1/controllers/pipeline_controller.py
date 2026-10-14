@@ -1,14 +1,22 @@
+import logging
 from uuid import UUID
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 # Import SessionLocal (or your session maker) to create isolated background DB sessions
 from app.core.database import get_db, SessionLocal 
 from app.services.deal_service import DealService
-from app.services.hitl_manager import HITLManager
-from app.schemas.deal_intelligence import HumanApprovalRequest
+from app.services.hitl_manager import HITLManager, InvalidWorkflowState
+from app.schemas.deal_intelligence import (
+    HumanApprovalRequest,
+    PipelineStatusResponse,
+    PipelineTriggerResponse,
+)
 from app.schemas.hitl import (
+    CheckpointStatus,
     DynamicInstructionRequest,
     ManualPauseRequest,
     ManualResumeRequest,
@@ -24,102 +32,111 @@ router = APIRouter(prefix="/deals/{deal_id}/pipeline", tags=["Pipeline & HITL"])
 
 async def run_pipeline_background(deal_id: UUID, thread_id: Optional[str]):
     """Background worker with an independent DB session lifecycle."""
-    # 1. Create a brand new database session specifically for this background task
-    db = SessionLocal() 
-    try:
-        deal_service = DealService(db)
-        await deal_service.run_deal_intelligence_workflow(
-            deal_id=deal_id, 
-            thread_id=thread_id
-        )
-    except Exception as e:
-        print(f"Background pipeline execution failed for deal {deal_id}: {str(e)}")
-    finally:
-        # 2. Ensure the background session is closed when the workflow finishes
-        db.close()
+    async with SessionLocal() as db:
+        try:
+            deal_service = DealService(db)
+            await deal_service.run_deal_intelligence_workflow(deal_id=deal_id, thread_id=thread_id)
+        except Exception:
+            logger.exception("Background pipeline execution failed for deal %s", deal_id)
+
 
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
 
-@router.post("/trigger", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/trigger", status_code=status.HTTP_202_ACCEPTED, response_model=PipelineTriggerResponse)
 async def trigger_pipeline(
     deal_id: UUID,
     background_tasks: BackgroundTasks,
     thread_id: Optional[str] = None, 
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Starts or resumes the LangGraph agent state machine (Nodes 1–6).
     """
     deal_service = DealService(db)
-    
-    # 1. Fast synchronous check using the request-scoped DB session
-    deal = deal_service.get_deal(deal_id)
+
+    deal = await deal_service.get_deal(deal_id)
     if not deal:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deal not found")
+    if deal.status in ("RUNNING", "PAUSE_REQUESTED", "AWAITING_REVIEW"):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Pipeline is {deal.status}")
+    await deal_service.deal_repo.update_deal_status(deal_id, "RUNNING")   # claim it before queuing
+    background_tasks.add_task(run_pipeline_background, deal_id, None)
+    return PipelineTriggerResponse(
+        status="processing",
+        message=f"Pipeline execution queued for deal {deal_id}.",
+        thread_id=thread_id,
+    )
 
-    # 2. Queue the heavy workflow execution (DO NOT pass 'db' here)
-    background_tasks.add_task(run_pipeline_background, deal_id, thread_id)
-    
-    # 3. Immediately return success to the client
-    return {
-        "status": "processing",
-        "message": f"Pipeline execution queued for deal {deal_id}.",
-        "thread_id": thread_id
-    }
 
-
-@router.get("/status")
-def get_pipeline_status(deal_id: UUID, db: Session = Depends(get_db)):
+@router.get("/status", response_model=PipelineStatusResponse)
+async def get_pipeline_status(deal_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Checks the current execution status (RUNNING, PAUSED_FOR_HUMAN_REVIEW, COMPLETED, FAILED).
     """
     deal_service = DealService(db)
-    deal = deal_service.deal_repo.get_deal_by_id(deal_id)
+    deal = await deal_service.deal_repo.get_deal_by_id(deal_id)
     if not deal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
-    
-    return {
-        "deal_id": deal.id,
-        "status": deal.status
-    }
+
+    return PipelineStatusResponse(deal_id=deal.id, status=deal.status)
 
 
-@router.get("/state")
-def get_pipeline_state(deal_id: UUID, db: Session = Depends(get_db)) -> Dict[str, Any]:
+@router.get("/state", response_model=WorkflowStateSnapshot)
+async def get_pipeline_state(deal_id: UUID, db: AsyncSession = Depends(get_db)) -> WorkflowStateSnapshot:
     """
-    Returns the accumulated state dictionary for frontend review during the HITL pause.
+    Returns the accumulated state snapshot for frontend review during the HITL pause.
     """
     deal_service = DealService(db)
-    context = deal_service.get_deal_context(deal_id)
+    deal = await deal_service.get_deal(deal_id)
+    context = await deal_service.get_deal_context(deal_id)
     if not context:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
-    
-    return context.get("active_state", {})
 
+    active_state = context.get("active_state") or {}
+    ps = active_state.get("priorities_and_pain_points") or {}
+    if not isinstance(ps, dict):
+        ps = {}
+    normalized_state = {
+        "deal_id": str(deal_id),
+        "current_step": active_state.get("current_step"),
+        "execution_paused_at": active_state.get("execution_paused_at"),
+        "last_execution_resumption": active_state.get("last_execution_resumption"),
+        "pause_requested": bool(active_state.get("pause_requested", False)),
+        "manual_pause_at_node": active_state.get("manual_pause_at_node"),
+        "dynamic_instructions": active_state.get("dynamic_instructions"),
+        "mandatory_review_checkpoint": active_state.get("mandatory_review_checkpoint", "pending"),
+        "human_approved": bool(active_state.get("human_approved", False)),
+        "human_feedback": active_state.get("human_feedback"),
+        "target_company": active_state.get("target_company") or (deal.target_company if deal else None),
+        "target_industry": active_state.get("target_industry") or (deal.target_industry if deal else None),
+        "meeting_objective": active_state.get("meeting_objective") or (deal.meeting_objective if deal else None),
+        "company_overview": active_state.get("company_research"),
+        "financial_intelligence": active_state.get("financial_intelligence"),
+        "stakeholder_intelligence": active_state.get("stakeholder_intelligence"),
+        "industry_analysis": active_state.get("industry_analysis"),
+        "priorities": ps.get("priorities") or [],
+        "detected_pain_points": ps.get("pain_points") or [],
+        "service_mappings": active_state.get("service_mappings") or [],
+        "matched_internal_assets": active_state.get("matched_internal_assets") or [],
+        "cxo_executive_brief": active_state.get("cxo_executive_brief") or None,
+        "node_statuses": active_state.get("node_statuses") or {},
+        "errors": active_state.get("errors"),
+    }
+    return WorkflowStateSnapshot.model_validate(normalized_state)
 
-@router.post("/human-approval")
+@router.post("/human-approval")          # legacy: same path
 async def submit_human_approval(
-    deal_id: UUID, 
-    approval_request: HumanApprovalRequest, 
-    db: Session = Depends(get_db)
+    deal_id: UUID, approval_request: HumanApprovalRequest,
+    background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db),
 ):
-    """
-    Submits user edits/feedback on asset mappings and resumes execution to Nodes 7–8.
-    """
-    deal_service = DealService(db)
-    try:
-        result = await deal_service.submit_human_approval(
-            deal_id=deal_id, 
-            approval_request=approval_request
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to resume pipeline: {str(e)}")
-
+    req = MandatoryReviewApprovalRequest(
+        checkpoint_status=CheckpointStatus.APPROVED if approval_request.approved else CheckpointStatus.NEEDS_REVISION,
+        feedback=approval_request.feedback,
+        custom_selected_assets=approval_request.custom_selected_assets,
+    )
+    return await submit_mandatory_review_approval(deal_id, req, background_tasks, db)
 
 # ============================================================================
 # NEW HITL ENDPOINTS: Dynamic Steering, Pause/Resume, Mandatory Review
@@ -129,7 +146,7 @@ async def submit_human_approval(
 async def submit_dynamic_instruction(
     deal_id: UUID,
     instruction_request: DynamicInstructionRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     DYNAMIC STEERING: Submits real-time instruction guidance to the active node.
@@ -150,8 +167,10 @@ async def submit_dynamic_instruction(
     """
     hitl_manager = HITLManager(db)
     try:
-        result = hitl_manager.submit_dynamic_instruction(deal_id, instruction_request)
+        result = await hitl_manager.submit_dynamic_instruction(deal_id, instruction_request)
         return result
+    except InvalidWorkflowState as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -165,7 +184,7 @@ async def submit_dynamic_instruction(
 async def request_manual_pause(
     deal_id: UUID,
     pause_request: ManualPauseRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     MANUAL PAUSE: Requests workflow pause at the next node boundary.
@@ -181,8 +200,10 @@ async def request_manual_pause(
     """
     hitl_manager = HITLManager(db)
     try:
-        result = hitl_manager.request_manual_pause(deal_id, pause_request)
+        result = await hitl_manager.request_manual_pause(deal_id, pause_request)
         return result
+    except InvalidWorkflowState as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -196,7 +217,8 @@ async def request_manual_pause(
 async def resume_workflow_after_pause(
     deal_id: UUID,
     resume_request: ManualResumeRequest,
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
 ):
     """
     MANUAL RESUME: Resumes workflow execution after manual pause.
@@ -215,8 +237,12 @@ async def resume_workflow_after_pause(
     """
     hitl_manager = HITLManager(db)
     try:
-        result = hitl_manager.resume_workflow_after_pause(deal_id, resume_request)
+        result = await hitl_manager.resume_workflow_after_pause(deal_id, resume_request)
+        if result.get("should_run"):
+            background_tasks.add_task(run_pipeline_background, deal_id, None)
         return result
+    except InvalidWorkflowState as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -230,7 +256,8 @@ async def resume_workflow_after_pause(
 async def submit_mandatory_review_approval(
     deal_id: UUID,
     approval_request: MandatoryReviewApprovalRequest,
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
 ):
     """
     MANDATORY REVIEW GATE: Submits approval/modifications for final brief review.
@@ -260,8 +287,12 @@ async def submit_mandatory_review_approval(
     """
     hitl_manager = HITLManager(db)
     try:
-        result = hitl_manager.submit_mandatory_review_approval(deal_id, approval_request)
+        result = await hitl_manager.submit_mandatory_review_approval(deal_id, approval_request)
+        if result.get("should_run"):
+            background_tasks.add_task(run_pipeline_background, deal_id, None)
         return result
+    except InvalidWorkflowState as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -274,7 +305,7 @@ async def submit_mandatory_review_approval(
 @router.get("/hitl/checkpoint-state")
 async def get_checkpoint_state(
     deal_id: UUID,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
     WORKFLOW STATE FOR REVIEW: Returns current workflow state at HITL checkpoints.
@@ -298,7 +329,7 @@ async def get_checkpoint_state(
     """
     hitl_manager = HITLManager(db)
     try:
-        state = hitl_manager.get_workflow_checkpoint_state(deal_id)
+        state = await hitl_manager.get_workflow_checkpoint_state(deal_id)
         return state
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -314,11 +345,11 @@ async def get_checkpoint_state(
 # ============================================================================
 
 @router.get("/execution/history")
-async def get_execution_timeline(deal_id: UUID, db: Session = Depends(get_db)):
+async def get_execution_timeline(deal_id: UUID, db: AsyncSession = Depends(get_db)):
     """Get all execution versions/runs for this deal with their checkpoints."""
     deal_service = DealService(db)
     try:
-        return deal_service.get_execution_timeline(deal_id)
+        return await deal_service.get_execution_timeline(deal_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -327,12 +358,12 @@ async def get_execution_timeline(deal_id: UUID, db: Session = Depends(get_db)):
 async def get_thread_history(
     deal_id: UUID,
     thread_id: str,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get all checkpoints in a specific execution thread."""
     deal_service = DealService(db)
     try:
-        return deal_service.get_thread_history(deal_id, thread_id)
+        return await deal_service.get_thread_history(deal_id, thread_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -341,14 +372,14 @@ async def get_thread_history(
 async def get_checkpoint_state_detail(
     deal_id: UUID,
     checkpoint_id: str,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get full state snapshot at a specific checkpoint."""
     deal_service = DealService(db)
     from app.services.execution_history_service import ExecutionHistoryService
     history_service = ExecutionHistoryService(db)
     try:
-        state = history_service.get_checkpoint_state(deal_id, checkpoint_id)
+        state = await history_service.get_checkpoint_state(deal_id, checkpoint_id)
         if not state:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checkpoint not found")
         return state
@@ -361,7 +392,7 @@ async def resume_from_checkpoint(
     deal_id: UUID,
     checkpoint_id: str,
     thread_id: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Resume workflow from a specific past checkpoint."""
     deal_service = DealService(db)

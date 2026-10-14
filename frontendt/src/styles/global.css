@@ -19,7 +19,7 @@
 @layer components {
   /* Use this class for the Deal Intelligence Widgets (Company, Financials, etc.) */
   .cosmic-card {
-    @apply bg-cosmic-glass backdrop-blur-md border border-cosmic-border rounded-xl shadow-xl overflow-hidden;
+    @apply bg-cosmic-glass backdrop-blur-md border border-cosmic-border rounded-xl shadow-xl overflow-visible;
   }
 
   /* Standardized primary button */
@@ -27,5 +27,90 @@
     @apply bg-nagarro-green text-black font-semibold py-2 px-4 rounded-lg transition-colors duration-200 
     hover:bg-nagarro-hover focus:outline-none focus:ring-2 focus:ring-nagarro-green focus:ring-opacity-50 
     disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .company-intel-tab {
+    @apply inline-flex items-center justify-center whitespace-nowrap rounded-full border border-cosmic-border bg-cosmic-bg/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-cosmic-muted transition-all duration-200 hover:border-nagarro-green/40 hover:text-white focus:outline-none focus:ring-2 focus:ring-nagarro-green focus:ring-offset-2 focus:ring-offset-cosmic-bg;
+  }
+
+  .company-intel-tab.active {
+    @apply border-nagarro-green/40 bg-nagarro-green/10 text-nagarro-green shadow-[0_0_0_1px_rgba(110,231,183,0.2),0_0_20px_rgba(110,231,183,0.12)];
+  }
+
+  .source-chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-cosmic-border bg-cosmic-bg/40 px-2.5 py-1 text-[11px] text-cosmic-muted transition-all duration-200 hover:border-nagarro-green/40 hover:text-white;
+  }
+
+  .source-chip-number {
+    @apply inline-flex items-center justify-center rounded-full border border-cosmic-border bg-cosmic-bg/60 px-1.5 py-0.5 text-[10px] font-semibold text-nagarro-green;
+  }
+
+  .source-chip-domain {
+    @apply max-w-[160px] truncate;
+  }
+
+  .source-chip-badge {
+    @apply inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em];
+  }
+
+  .source-popover {
+    @apply absolute left-0 top-full z-40 mt-2 w-[290px] max-w-[calc(100vw-2rem)] rounded-2xl border border-cosmic-border bg-cosmic-glass p-3 shadow-2xl backdrop-blur-md;
+  }
+
+  .pipeline-flow-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .pipeline-flow-scroll::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: #111827 !important;
+  }
+
+  .print-hide {
+    display: none !important;
+  }
+
+  .cosmic-card,
+  .print-card,
+  .company-intel-tab,
+  .source-chip,
+  .source-popover,
+  .btn-nagarro {
+    box-shadow: none !important;
+    background: white !important;
+    color: #111827 !important;
+    border-color: rgba(148, 163, 184, 0.8) !important;
+  }
+
+  .print-shell {
+    color: #111827 !important;
+  }
+
+  .print-shell h1,
+  .print-shell h2,
+  .print-shell h3,
+  .print-shell h4,
+  .print-shell h5,
+  .print-shell p,
+  .print-shell div,
+  .print-shell span,
+  .print-shell button {
+    color: #111827 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

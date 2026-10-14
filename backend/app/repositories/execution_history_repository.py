@@ -1,18 +1,17 @@
-from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_
+from sqlalchemy import and_, desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.execution_history import ExecutionHistory
 
 
 class ExecutionHistoryRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    def save_checkpoint(
+    async def save_checkpoint(
         self,
         deal_id: UUID,
         thread_id: str,
@@ -37,55 +36,75 @@ class ExecutionHistoryRepository:
             created_by=user_id,
         )
         self.db.add(history)
-        self.db.commit()
+        await self.db.commit()
         return history
 
-    def get_checkpoint(self, checkpoint_id: str, deal_id: UUID) -> Optional[ExecutionHistory]:
+    async def get_checkpoint(self, checkpoint_id: str, deal_id: UUID) -> Optional[ExecutionHistory]:
         """Get specific checkpoint."""
-        return self.db.query(ExecutionHistory).filter(
-            and_(
-                ExecutionHistory.checkpoint_id == checkpoint_id,
-                ExecutionHistory.deal_id == deal_id,
+        result = await self.db.execute(
+            select(ExecutionHistory).where(
+                and_(
+                    ExecutionHistory.checkpoint_id == checkpoint_id,
+                    ExecutionHistory.deal_id == deal_id,
+                )
             )
-        ).first()
+        )
+        return result.scalar_one_or_none()
 
-    def get_deal_history(self, deal_id: UUID, limit: int = 100) -> List[ExecutionHistory]:
+    async def get_deal_history(self, deal_id: UUID, limit: int = 100) -> List[ExecutionHistory]:
         """Get all checkpoints for a deal, newest first."""
-        return self.db.query(ExecutionHistory).filter(
-            ExecutionHistory.deal_id == deal_id
-        ).order_by(desc(ExecutionHistory.created_at)).limit(limit).all()
+        result = await self.db.execute(
+            select(ExecutionHistory)
+            .where(ExecutionHistory.deal_id == deal_id)
+            .order_by(desc(ExecutionHistory.created_at))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
-    def get_thread_checkpoints(self, thread_id: str, deal_id: UUID) -> List[ExecutionHistory]:
+    async def get_thread_checkpoints(self, thread_id: str, deal_id: UUID) -> List[ExecutionHistory]:
         """Get all checkpoints in a thread."""
-        return self.db.query(ExecutionHistory).filter(
-            and_(
-                ExecutionHistory.thread_id == thread_id,
-                ExecutionHistory.deal_id == deal_id,
+        result = await self.db.execute(
+            select(ExecutionHistory)
+            .where(
+                and_(
+                    ExecutionHistory.thread_id == thread_id,
+                    ExecutionHistory.deal_id == deal_id,
+                )
             )
-        ).order_by(ExecutionHistory.created_at).all()
+            .order_by(ExecutionHistory.created_at)
+        )
+        return list(result.scalars().all())
 
-    def get_latest_checkpoint(self, deal_id: UUID) -> Optional[ExecutionHistory]:
+    async def get_latest_checkpoint(self, deal_id: UUID) -> Optional[ExecutionHistory]:
         """Get most recent checkpoint for a deal."""
-        return self.db.query(ExecutionHistory).filter(
-            ExecutionHistory.deal_id == deal_id
-        ).order_by(desc(ExecutionHistory.created_at)).first()
+        result = await self.db.execute(
+            select(ExecutionHistory)
+            .where(ExecutionHistory.deal_id == deal_id)
+            .order_by(desc(ExecutionHistory.created_at))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
-    def get_thread_at_checkpoint(self, thread_id: str) -> Optional[ExecutionHistory]:
+    async def get_thread_at_checkpoint(self, thread_id: str) -> Optional[ExecutionHistory]:
         """Get latest checkpoint in thread."""
-        return self.db.query(ExecutionHistory).filter(
-            ExecutionHistory.thread_id == thread_id
-        ).order_by(desc(ExecutionHistory.created_at)).first()
+        result = await self.db.execute(
+            select(ExecutionHistory)
+            .where(ExecutionHistory.thread_id == thread_id)
+            .order_by(desc(ExecutionHistory.created_at))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
-    def list_all_threads(self, deal_id: UUID) -> List[tuple]:
+    async def list_all_threads(self, deal_id: UUID) -> List[tuple]:
         """List all unique threads (executions) for a deal with latest checkpoint."""
-        results = self.db.query(
-            ExecutionHistory.thread_id,
-            ExecutionHistory.created_at,
-            ExecutionHistory.current_step
-        ).filter(
-            ExecutionHistory.deal_id == deal_id
-        ).distinct(ExecutionHistory.thread_id).order_by(
-            ExecutionHistory.thread_id,
-            desc(ExecutionHistory.created_at)
-        ).all()
-        return results
+        result = await self.db.execute(
+            select(
+                ExecutionHistory.thread_id,
+                ExecutionHistory.created_at,
+                ExecutionHistory.current_step,
+            )
+            .where(ExecutionHistory.deal_id == deal_id)
+            .distinct(ExecutionHistory.thread_id)
+            .order_by(ExecutionHistory.thread_id, desc(ExecutionHistory.created_at))
+        )
+        return list(result.all())

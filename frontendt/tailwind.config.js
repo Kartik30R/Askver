@@ -4,15 +4,15 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'class', // Enforces dark mode styling
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
         // Core Brand
         nagarro: {
-          green: '#B2D235',
-          hover: '#9CBA2E',
-          active: '#849C27',
+          green: '#47D7AC',   // The exact Nagarro primary green
+          hover: '#36B894',   // Slightly darker for hover states
+          active: '#2A9E7D',  // Even darker for click/active states
         },
         // Cosmic Dark Theme
         cosmic: {

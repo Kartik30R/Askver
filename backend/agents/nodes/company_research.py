@@ -2,20 +2,20 @@ import logging
 import json
 from typing import Dict, Any
 
-from backend.agents.nodes.node_middleware import (
+from agents.nodes.node_middleware import (
     apply_instruction_context_to_prompt, 
     get_injection_context, 
     inject_dynamic_instructions
 )
-from backend.app.core.config import settings  # Assuming settings export
-from backend.agents.tools.financial_tool import get_company_financials
-from backend.agents.tools.search_tool import search_news, search_web
+from agents.state import DealIntelligenceState
+from app.core.config import settings  # Assuming settings export
+from agents.tools.financial_tool import get_company_financials
+from agents.tools.search_tool import search_news, search_web
+from app.services.llm_provider import get_llm
 
 # Import the state and strict Pydantic schema exactly as defined in your architecture
-from app.agents.state import DealIntelligenceState
-from backend.app.schemas.node_1_company import CompanyResearchSchema
+from app.schemas.node_1_company import CompanyResearchSchema
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 logger = logging.getLogger(__name__)
@@ -89,16 +89,16 @@ TARGET COMPANY: {target_company}
 TARGET INDUSTRY: {target_industry}
 
 RESEARCH CONTEXT DATA:
-{json.dumps(raw_context, indent=2)}
+{json.dumps(raw_context, separators=(',', ':'), default=str)}
 
 Synthesize the data into the required structured schema. Make sure every single field is populated with maximum precision and explicit source citations.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-3.8-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.1,
-            google_api_key=GEMINI_API_KEY
         )
 
         # Inject dynamic instructions via middleware mapping

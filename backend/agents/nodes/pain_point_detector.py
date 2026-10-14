@@ -2,16 +2,16 @@ import logging
 import json
 from typing import Dict, Any, List
 
-from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
-from backend.agents.state import DealIntelligenceState
-from backend.app.core.config import settings
-from backend.app.services.vector_service import query_client_deal_docs
+from agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from agents.state import DealIntelligenceState
+from app.core.config import settings
+from app.services.vector_service import query_client_deal_docs
+from app.services.llm_provider import get_llm
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # Import strict schema
-from backend.app.schemas.node_4_priorities import BusinessPrioritiesSchema
+from app.schemas.node_4_priorities import BusinessPrioritiesSchema
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +95,16 @@ TARGET INDUSTRY: {target_industry}
 MEETING OBJECTIVE: {meeting_objective}
 
 ACCUMULATED DEAL INTELLIGENCE CONTEXT:
-{json.dumps(aggregated_context, indent=2)}
+{json.dumps(aggregated_context, separators=(',', ':'), default=str)}
 
 Cross-examine all public and client-provided sources, then synthesize the business priorities and structured pain points strictly matching BusinessPrioritiesSchema.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-2.0-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.1,
-            google_api_key=settings.GEMINI_API_KEY
         )
 
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))

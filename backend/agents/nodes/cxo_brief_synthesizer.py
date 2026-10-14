@@ -2,16 +2,31 @@ import logging
 import json
 from typing import Dict, Any
 
-from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
-from backend.agents.state import DealIntelligenceState
-from backend.app.core.config import settings
+from agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from agents.state import DealIntelligenceState
+from app.core.config import settings
+from app.schemas.node_7_brief import MeetingStrategySchema
+from app.services.llm_provider import get_llm
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from backend.app.schemas.deal_intelligence import MeetingStrategySchema
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_headline_narrative(detailed_point) -> Dict[str, str]:
+    """Extract headline and narrative from DetailedPoint, omitting citations."""
+    if hasattr(detailed_point, 'headline'):
+        return {
+            "headline": detailed_point.headline,
+            "narrative": detailed_point.detailed_narrative
+        }
+    elif isinstance(detailed_point, dict):
+        return {
+            "headline": detailed_point.get("headline", ""),
+            "narrative": detailed_point.get("detailed_narrative", "")
+        }
+    return {}
 
 
 @inject_dynamic_instructions
@@ -32,6 +47,7 @@ def cxo_brief_generator_node(state: DealIntelligenceState) -> Dict[str, Any]:
     priorities_and_pain_points = state.get("priorities_and_pain_points")
     matched_internal_assets = state.get("matched_internal_assets", [])
     service_mappings = state.get("service_mappings", [])
+    financial_intel = state.get("financial_intelligence")
 
     # Human-in-the-loop review overrides
     human_approved = state.get("human_approved", False)
@@ -40,18 +56,78 @@ def cxo_brief_generator_node(state: DealIntelligenceState) -> Dict[str, Any]:
 
     logger.info(f"Starting CXO Brief Generator Node for: '{target_company}'")
 
+    # Helper: Strip citations from company research
+    def strip_company_citations(cr):
+        if not cr:
+            return {}
+        cr_dict = cr.model_dump() if hasattr(cr, 'model_dump') else cr
+        return {
+            "overview": {
+                "summary": _extract_headline_narrative(cr_dict["overview"]["summary"]),
+                "business_model": _extract_headline_narrative(cr_dict["overview"]["business_model"]),
+                "revenue_streams": [_extract_headline_narrative(rs) for rs in cr_dict["overview"].get("revenue_streams", [])],
+                "employee_count_estimate": cr_dict["overview"].get("employee_count_estimate"),
+                "headquarters": cr_dict["overview"].get("headquarters"),
+            },
+            "leadership_team": cr_dict.get("leadership_team", []),
+            "digital_initiatives": cr_dict.get("digital_initiatives", []),
+            "technology_investments": cr_dict.get("technology_investments", []),
+            "recent_news_and_m_and_a": [
+                {"headline": item.get("headline", ""), "category": item.get("category", ""), 
+                 "details": _extract_headline_narrative(item.get("details", {}))}
+                for item in cr_dict.get("recent_news_and_m_and_a", [])
+            ],
+        }
+
+    # Helper: Strip citations from industry analysis
+    def strip_industry_citations(ia):
+        if not ia:
+            return {}
+        ia_dict = ia.model_dump() if hasattr(ia, 'model_dump') else ia
+        return {
+            "major_trends": [_extract_headline_narrative(t) for t in ia_dict.get("major_trends", [])],
+            "regulatory_compliance": [_extract_headline_narrative(r) for r in ia_dict.get("regulatory_compliance", [])],
+            "risks_and_challenges": [_extract_headline_narrative(r) for r in ia_dict.get("risks_and_challenges", [])],
+            "technology_benchmarks": [_extract_headline_narrative(t) for t in ia_dict.get("technology_benchmarks", [])],
+        }
+
+    # Helper: Strip citations from service mappings
+    def strip_mapping_citations(mappings):
+        out = []
+        for sm in mappings or []:
+            d = sm.model_dump() if hasattr(sm, "model_dump") else sm
+            out.append({
+                "client_need": d.get("client_need", ""),
+                "detected_bottleneck": d.get("detected_bottleneck", ""),
+                "recommended_offering": d.get("recommended_offering", ""),
+                "expected_business_impact": d.get("expected_business_impact", ""),
+                "supporting_proof_assets": [
+                    {"asset_id": a.get("asset_id"), "asset_name": a.get("asset_name"),
+                     "key_metrics_achieved": a.get("key_metrics_achieved", [])}
+                    for a in d.get("supporting_proof_assets") or []
+                ],
+            })
+        return out
+
     aggregated_context = {
         "deal_inputs": {
             "target_company": target_company,
             "target_industry": target_industry,
             "meeting_objective": meeting_objective,
         },
-        "company_research": company_research.model_dump() if company_research else {},
+       
+        "company_research": strip_company_citations(company_research),
+        "financial_intelligence": financial_intel.model_dump() if financial_intel else {},
         "stakeholder_personas": stakeholder_intel.model_dump() if stakeholder_intel else {},
-        "industry_and_compliance": industry_analysis.model_dump() if industry_analysis else {},
+        "industry_and_compliance": strip_industry_citations(industry_analysis),
         "strategic_priorities_and_pain_points": priorities_and_pain_points.model_dump() if priorities_and_pain_points else {},
-        "matched_internal_proof_assets": [a.model_dump() if hasattr(a, 'model_dump') else a for a in matched_internal_assets],
-        "proposed_service_mappings": [sm.model_dump() if hasattr(sm, 'model_dump') else sm for sm in service_mappings],
+        "matched_internal_proof_assets": [
+            {"asset_id": a.get("asset_id") if isinstance(a, dict) else getattr(a, 'asset_id', None),
+             "asset_name": a.get("asset_name") if isinstance(a, dict) else getattr(a, 'asset_name', None),
+             "asset_type": a.get("asset_type") if isinstance(a, dict) else getattr(a, 'asset_type', None)}
+            for a in matched_internal_assets
+        ],
+        "proposed_service_mappings": strip_mapping_citations(service_mappings),
         "human_review_context": {
             "human_approved": human_approved,
             "human_feedback": human_feedback,
@@ -74,16 +150,16 @@ INSIGHT & TONE RULES:
 
     human_message_content = f"""
 COMPLETE DEAL INTELLIGENCE DATA:
-{json.dumps(aggregated_context, indent=2)}
+{json.dumps(aggregated_context, separators=(',', ':'), default=str)}
 
 Synthesize this intelligence into the final CXO Meeting Strategy Brief.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-2.0-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.2,
-            google_api_key=settings.GEMINI_API_KEY
         )
 
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))

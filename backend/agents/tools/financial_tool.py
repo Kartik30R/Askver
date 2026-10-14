@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -84,6 +85,19 @@ def _is_us_exchange(exchange: Optional[str]) -> bool:
             "NYSEAMERICAN",
         }
     )
+
+
+# Yahoo ticker suffixes for non-US listings (NSE/BSE, London, Frankfurt, ...)
+GLOBAL_SUFFIXES = (
+    ".NS", ".BO", ".L", ".DE", ".PA", ".AS", ".SW", ".TO", ".HK", ".T", ".AX", ".SI",
+)
+
+
+def _is_acceptable_symbol(symbol: str, exchange: Optional[str]) -> bool:
+    """US listings plus well-known global exchanges (India, UK, EU, ...)."""
+    if _is_us_exchange(exchange):
+        return True
+    return str(symbol).upper().endswith(GLOBAL_SUFFIXES)
 
 
 def classify_market_cap(market_cap: Optional[float]) -> str:
@@ -212,77 +226,123 @@ def _lookup_sec_company(search_term: str) -> Optional[Dict[str, str]]:
 # Yahoo Finance company/ticker resolution
 # ---------------------------------------------------------------------------
 
+def _symbol_has_quote(symbol: str) -> bool:
+    """True only if Yahoo actually knows this symbol (has a live price)."""
+    try:
+        t = yf.Ticker(symbol)
+        try:
+            price = t.fast_info.get("last_price") or t.fast_info.get("lastPrice")
+            if price:
+                return True
+        except Exception:
+            pass
+        info = t.info or {}
+        return bool(
+            info.get("regularMarketPrice")
+            or info.get("currentPrice")
+            or info.get("marketCap")
+        )
+    except Exception:
+        return False
+
+
+def _search_quotes(query: str) -> List[Dict[str, Any]]:
+    """Search Yahoo for symbols. Works across yfinance versions, then falls back to the raw HTTP endpoint."""
+    # yfinance >= 0.2.5x: yf.Search(...).quotes
+    try:
+        if hasattr(yf, "Search"):
+            quotes = yf.Search(query, max_results=10, news_count=0).quotes
+            if quotes:
+                return list(quotes)
+    except Exception as exc:
+        logger.warning("yf.Search failed for %s: %s", query, exc)
+
+    # Older/other builds: yf.search(...)
+    try:
+        if hasattr(yf, "search"):
+            res = yf.search(query, max_results=10, news=False)
+            quotes = res.get("quotes", []) if isinstance(res, dict) else []
+            if quotes:
+                return list(quotes)
+    except Exception as exc:
+        logger.warning("yf.search failed for %s: %s", query, exc)
+
+    # Last resort: Yahoo's public search endpoint
+    try:
+        url = (
+            "https://query2.finance.yahoo.com/v1/finance/search?"
+            f"q={quote(query)}&quotesCount=10&newsCount=0"
+        )
+        req = request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8", errors="ignore")).get("quotes", [])
+    except Exception as exc:
+        logger.warning("Yahoo search endpoint failed for %s: %s", query, exc)
+
+    return []
+
+
+def _resolve_by_name(raw: str) -> Optional[str]:
+    cleaned = re.sub(
+        r"\b(inc|corp|corporation|company|co|ltd|limited|plc|llc)\b\.?",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.")
+
+    seen = set()
+    for query in (raw, cleaned):
+        if not query or query.lower() in seen:
+            continue
+        seen.add(query.lower())
+
+        for item in _search_quotes(query):
+            symbol = item.get("symbol")
+            exchange = item.get("exchange") or item.get("exchDisp") or item.get("fullExchangeName")
+            quote_type = str(item.get("quoteType", "EQUITY")).upper()
+
+            if not symbol or quote_type not in {"EQUITY", ""}:
+                continue
+            if _is_acceptable_symbol(symbol, exchange):
+                return str(symbol).upper()
+
+    return None
+
+
 def resolve_company_symbol(
     company_or_ticker: str,
 ) -> Optional[str]:
+    """
+    Resolve a company name OR ticker to a verified Yahoo symbol.
 
+    Bare names like "Microsoft" match the ticker regex, so a regex alone is not
+    enough: an input is only treated as a ticker if it looks like one
+    (UPPERCASE or contains . / -) AND Yahoo returns a real quote for it.
+    Everything else goes through name search first.
+    """
     raw = _normalize_company_name(company_or_ticker)
 
     if not raw:
         return None
 
-    candidate = raw.upper()
+    looks_like_ticker = bool(
+        re.fullmatch(r"[A-Za-z0-9.\-]{1,10}", raw)
+        and (raw.isupper() or any(ch in raw for ch in ".-") or any(ch.isdigit() for ch in raw))
+    )
 
-    # Possible ticker
-    if re.fullmatch(r"[A-Z0-9.\-]{1,10}", candidate):
-        try:
-            info = yf.Ticker(raw).info or {}
+    # 1. Explicit-looking ticker (MSFT, RELIANCE.NS, BRK-B) - verify it exists
+    if looks_like_ticker and _symbol_has_quote(raw.upper()):
+        return raw.upper()
 
-            if info.get("symbol"):
-                return str(info["symbol"]).upper()
+    # 2. Company name search (Microsoft -> MSFT)
+    by_name = _resolve_by_name(raw)
+    if by_name:
+        return by_name
 
-            return raw.upper()
-
-        except Exception:
-            return raw.upper()
-
-    search_queries = [
-        raw,
-        raw.replace(" INC", "")
-           .replace(" CORP", "")
-           .replace(" CORPORATION", "")
-           .replace(" COMPANY", "")
-           .strip(),
-        raw.split()[0],
-    ]
-
-    seen = set()
-
-    for query in search_queries:
-        if not query or query in seen:
-            continue
-
-        seen.add(query)
-
-        try:
-            search_result = yf.search(
-                query,
-                max_results=10,
-                news=False,
-            )
-
-            quotes = (
-                search_result.get("quotes", [])
-                if isinstance(search_result, dict)
-                else []
-            )
-
-            for item in quotes:
-                symbol = item.get("symbol")
-                exchange = (
-                    item.get("exchange")
-                    or item.get("fullExchangeName")
-                )
-
-                if symbol and _is_us_exchange(exchange):
-                    return str(symbol).upper()
-
-        except Exception as exc:
-            logger.warning(
-                "Yahoo Finance lookup failed for %s: %s",
-                query,
-                exc,
-            )
+    # 3. Short mixed-case input that might still be a ticker (e.g. "Aapl")
+    if re.fullmatch(r"[A-Za-z]{1,5}", raw) and _symbol_has_quote(raw.upper()):
+        return raw.upper()
 
     return None
 
@@ -723,3 +783,39 @@ def get_company_financials(
             "No financial figures were fabricated."
         ),
     }
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+
+    # Enable logging output to see warnings/debug logs
+    logging.basicConfig(level=logging.INFO)
+
+    # Grab the search query from terminal argument, or default to "AAPL"
+    query = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
+
+    print(f"\n--- Testing public company lookup for: {query} ---")
+    res = get_company_financials(query)
+    print(json.dumps(res, indent=2))
+
+    # Optional: Test private company workflow if a second argument '--private' is passed
+    if "--private" in sys.argv:
+        print("\n--- Testing private company workflow with dummy evidence ---")
+        dummy_evidence = [
+            make_financial_evidence(
+                metric_name="revenue_growth",
+                value=0.25,
+                source_type="reputable_news",
+                confidence="medium",
+                notes="CEO interview on Bloomberg",
+            ),
+            make_financial_evidence(
+                metric_name="gross_margin",
+                value=0.55,
+                source_type="company_reported",
+                confidence="high",
+            ),
+        ]
+        private_res = get_company_financials("Stripe", private_evidence=dummy_evidence)
+        print(json.dumps(private_res, indent=2))

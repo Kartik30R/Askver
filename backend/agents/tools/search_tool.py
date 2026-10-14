@@ -1,12 +1,15 @@
-import os
+from datetime import datetime, timedelta
 import logging
-from typing import List, Dict, Any, Optional
-from duckduckgo_search import DDGS
+from typing import List, Dict, Any
+
+from ddgs import DDGS
 from tavily import TavilyClient
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+TAVILY_API_KEY ="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"
 
 
 def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
@@ -20,6 +23,10 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     if TAVILY_API_KEY:
         try:
             client = TavilyClient(api_key=TAVILY_API_KEY)
+
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=60)
+
             response = client.search(
                 query=query, 
                 max_results=max_results, 
@@ -56,13 +63,34 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
 
 def search_news(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
-    Searches recent news articles using DuckDuckGo News feed.
+    Prefer direct web search for news-style queries and only use DDGS News as a fallback.
+    This keeps the pipeline resilient when DDGS News returns empty results or stalls.
     """
-    results = []
+    if not query or not query.strip():
+        return []
+
+    web_results = search_web(query, max_results=max_results)
+    if web_results:
+        normalized = []
+        for item in web_results:
+            normalized.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("snippet", item.get("body", "")),
+                "published_date": item.get("published_date"),
+                "source_type": "WEB_SEARCH"
+            })
+        return normalized
+
     try:
         with DDGS() as ddgs:
             ddg_news = list(ddgs.news(query, max_results=max_results))
+            results = []
             for item in ddg_news:
+                if not isinstance(item, dict):
+                    continue
+                if not item.get("title") and not item.get("url"):
+                    continue
                 results.append({
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
@@ -70,9 +98,10 @@ def search_news(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
                     "published_date": item.get("date", ""),
                     "source_type": "DUCKDUCKGO_NEWS"
                 })
+            if results:
+                return results
     except Exception as e:
-        logger.error(f"News search failed: {str(e)}")
-        # Fallback to general web search
-        return search_web(f"news {query}", max_results=max_results)
+        logger.warning(f"News search failed for query '{query}': {str(e)}")
 
-    return results
+    logger.warning(f"No news or web results found for query '{query}'")
+    return []

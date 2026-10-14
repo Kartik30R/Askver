@@ -3,15 +3,15 @@ import json
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 
-from backend.agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
-from backend.agents.state import DealIntelligenceState
-from backend.app.core.config import settings
+from agents.nodes.node_middleware import apply_instruction_context_to_prompt, get_injection_context, inject_dynamic_instructions
+from agents.state import DealIntelligenceState
+from app.core.config import settings
+from app.services.llm_provider import get_llm
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # Import strict schema
-from backend.app.schemas.node_5_6_services import ServiceMappingSchema
+from app.schemas.node_5_6_services import ServiceMappingSchema
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +68,16 @@ SYNTHESIS & MAPPING RULES:
 
     human_message_content = f"""
 DEAL & SOLUTION MAPPING CONTEXT:
-{json.dumps(mapping_context, indent=2)}
+{json.dumps(mapping_context, separators=(',', ':'), default=str)}
 
 Synthesize the pain points and internal proof points into a structured set of service mappings matching the ServiceMappingWrapper schema.
 """
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        llm = get_llm(
+            model=settings.LLM_MODEL or "gemini-2.0-flash",
+            provider=settings.LLM_PROVIDER or "gemini",
             temperature=0.1,
-            google_api_key=settings.GEMINI_API_KEY
         )
 
         final_system_prompt = apply_instruction_context_to_prompt(system_prompt, get_injection_context(state))

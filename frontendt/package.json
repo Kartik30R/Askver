@@ -19,6 +19,7 @@
     "react-markdown": "^9.0.1",
     "react-redux": "^9.1.0",
     "react-router-dom": "^7.18.3",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {

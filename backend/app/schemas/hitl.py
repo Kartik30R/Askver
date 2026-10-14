@@ -95,29 +95,32 @@ class HumanApprovalRequest(BaseModel):
 
 
 class WorkflowStateSnapshot(BaseModel):
-    """
-    Returns current workflow state for HITL review and interaction.
-    """
     deal_id: str
-    current_step: Optional[str]
-    execution_paused_at: Optional[str]
-    last_execution_resumption: Optional[str]
-    pause_requested: bool
-    manual_pause_at_node: Optional[str]
-    dynamic_instructions: Optional[List[str]]
-    mandatory_review_checkpoint: str
-    human_approved: bool
-    human_feedback: Optional[str]
-    
-    # Summary of key intelligence data for review
-    company_overview: Optional[Dict[str, Any]] = None
-    detected_pain_points: Optional[List[Dict[str, Any]]] = None
-    service_mappings: Optional[List[Dict[str, Any]]] = None
-    matched_internal_assets: Optional[List[Dict[str, Any]]] = None
-    
-    node_statuses: Optional[Dict[str, str]] = None
-    errors: Optional[List[str]] = None
+    current_step: Optional[str] = None
+    execution_paused_at: Optional[str] = None
+    last_execution_resumption: Optional[str] = None
+    pause_requested: bool = False
+    manual_pause_at_node: Optional[str] = None
+    dynamic_instructions: Optional[List[str]] = None
+    mandatory_review_checkpoint: str = "pending"
+    human_approved: bool = False
+    human_feedback: Optional[str] = None
+    target_company: Optional[str] = None
+    target_industry: Optional[str] = None
+    meeting_objective: Optional[str] = None
 
+    company_overview: Optional[Dict[str, Any]] = None
+    financial_intelligence: Optional[Dict[str, Any]] = None
+    stakeholder_intelligence: Optional[Dict[str, Any]] = None
+    industry_analysis: Optional[Dict[str, Any]] = None
+    priorities: Optional[List[Any]] = None
+    detected_pain_points: Optional[List[Any]] = None
+    service_mappings: Optional[List[Any]] = None
+    matched_internal_assets: Optional[List[Any]] = None
+    cxo_executive_brief: Optional[Dict[str, Any]] = None
+
+    node_statuses: Optional[Dict[str, Any]] = None
+    errors: Optional[List[Any]] = None
 
 class HITLEventMessage(BaseModel):
     """

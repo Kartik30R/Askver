@@ -1,33 +1,21 @@
-import os
 import logging
 from typing import List
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+from app.services.vector_service import get_embeddings_model
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = settings.GEMINI_API_KEY
 
-
-def get_embedding_engine() -> GoogleGenerativeAIEmbeddings:
-    """
-    Initializes and returns Google's free hosted text-embedding-004 engine.
-    """
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is missing.")
-    
-    return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
-        google_api_key=GEMINI_API_KEY
-    )
+def get_embedding_engine():
+    """Returns the project-standard Gemini embedding client for document indexing and retrieval."""
+    return get_embeddings_model(is_query=False, task_type="retrieval_document")
 
 
 def embed_text_strings(texts: List[str]) -> List[List[float]]:
-    """
-    Utility function to embed a list of text strings.
-    """
+    """Utility function to embed a list of text strings using the canonical project configuration."""
     try:
         embeddings_model = get_embedding_engine()
         return embeddings_model.embed_documents(texts)
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {str(e)}")
-        raise e
+    except Exception as exc:
+        logger.error("Embedding generation failed: %s", exc)
+        raise

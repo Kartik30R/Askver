@@ -1,5 +1,6 @@
 import uuid
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
@@ -15,8 +16,9 @@ from app.schemas.user import UserCreate
 
 
 class AuthService:
-    def __init__(self, user_repo: UserRepository):
-        self.user_repo = user_repo
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.user_repo = UserRepository(db)
 
     async def register(self, user_create: UserCreate) -> tuple[User, str, str]:
         existing_user = await self.user_repo.get_by_email(user_create.email)
@@ -29,8 +31,8 @@ class AuthService:
         hashed_password = get_password_hash(user_create.password)
         user = await self.user_repo.create(user_create, hashed_password)
 
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        access_token = create_access_token(str(user.id))
+        refresh_token = create_refresh_token(str(user.id))
 
         return user, access_token, refresh_token
 
@@ -42,8 +44,8 @@ class AuthService:
                 detail="Incorrect email or password",
             )
 
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        access_token = create_access_token(str(user.id))
+        refresh_token = create_refresh_token(str(user.id))
 
         return user, access_token, refresh_token
 
@@ -57,13 +59,19 @@ class AuthService:
 
         user_id_str = payload.get("sub")
         if not user_id_str:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+            )
 
         user = await self.user_repo.get_by_id(uuid.UUID(user_id_str))
         if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
 
-        new_access_token = create_access_token(user.id)
-        new_refresh_token = create_refresh_token(user.id)
+        new_access_token = create_access_token(str(user.id))
+        new_refresh_token = create_refresh_token(str(user.id))
 
         return user, new_access_token, new_refresh_token

@@ -2,19 +2,19 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.execution_history_repository import ExecutionHistoryRepository
 from app.repositories.deal_repository import DealRepository
 
 
 class ExecutionHistoryService:
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
         self.history_repo = ExecutionHistoryRepository(db)
         self.deal_repo = DealRepository(db)
 
-    def save_execution_checkpoint(
+    async def save_execution_checkpoint(
         self,
         deal_id: UUID,
         thread_id: str,
@@ -25,7 +25,7 @@ class ExecutionHistoryService:
         version_number: int = 1,
     ) -> Dict[str, Any]:
         """Save checkpoint to execution history."""
-        self.history_repo.save_checkpoint(
+        await self.history_repo.save_checkpoint(
             deal_id=deal_id,
             thread_id=thread_id,
             checkpoint_id=checkpoint_id,
@@ -41,13 +41,13 @@ class ExecutionHistoryService:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-    def get_deal_timeline(self, deal_id: UUID) -> List[Dict[str, Any]]:
+    async def get_deal_timeline(self, deal_id: UUID) -> List[Dict[str, Any]]:
         """Get timeline of all executions/threads for a deal."""
-        threads = self.history_repo.list_all_threads(deal_id)
+        threads = await self.history_repo.list_all_threads(deal_id)
         timeline = []
 
         for thread_id, created_at, current_step in threads:
-            checkpoints = self.history_repo.get_thread_checkpoints(thread_id, deal_id)
+            checkpoints = await self.history_repo.get_thread_checkpoints(thread_id, deal_id)
             timeline.append({
                 "thread_id": thread_id,
                 "started_at": created_at.isoformat(),
@@ -58,9 +58,9 @@ class ExecutionHistoryService:
 
         return sorted(timeline, key=lambda x: x["started_at"], reverse=True)
 
-    def get_thread_history(self, thread_id: str, deal_id: UUID) -> List[Dict[str, Any]]:
+    async def get_thread_history(self, thread_id: str, deal_id: UUID) -> List[Dict[str, Any]]:
         """Get all checkpoints in a thread with summary info."""
-        checkpoints = self.history_repo.get_thread_checkpoints(thread_id, deal_id)
+        checkpoints = await self.history_repo.get_thread_checkpoints(thread_id, deal_id)
         return [
             {
                 "checkpoint_id": cp.checkpoint_id,
@@ -72,13 +72,13 @@ class ExecutionHistoryService:
             for cp in checkpoints
         ]
 
-    def get_checkpoint_state(
+    async def get_checkpoint_state(
         self,
         deal_id: UUID,
         checkpoint_id: str,
     ) -> Optional[Dict[str, Any]]:
         """Get full state snapshot at specific checkpoint."""
-        history = self.history_repo.get_checkpoint(checkpoint_id, deal_id)
+        history = await self.history_repo.get_checkpoint(checkpoint_id, deal_id)
         if not history:
             return None
 
@@ -91,13 +91,13 @@ class ExecutionHistoryService:
             "timestamp": history.created_at.isoformat(),
         }
 
-    def prepare_resume_state(
+    async def prepare_resume_state(
         self,
         deal_id: UUID,
         checkpoint_id: str,
     ) -> Optional[Dict[str, Any]]:
         """Get state ready for resuming from a checkpoint."""
-        history = self.history_repo.get_checkpoint(checkpoint_id, deal_id)
+        history = await self.history_repo.get_checkpoint(checkpoint_id, deal_id)
         if not history:
             return None
 

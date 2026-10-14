@@ -3,44 +3,64 @@ version: '3.8'
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: deal_intelligence_db
-    restart: always
+    container_name: askver_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: deal_db
+      POSTGRES_DB: askver_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d deal_db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d askver_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   api:
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: deal_intelligence_api
-    restart: always
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: askver_api
+    restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - ../.env
     environment:
-      - DATABASE_URL=postgresql+psycopg2://postgres:postgrespassword@db:5432/deal_db
-      - API_V1_STR=/api/v1
-      - PROJECT_NAME=Deal Intelligence Assistant
-      - JWT_SECRET_KEY=your_development_jwt_secret_key_change_in_prod
-      - JWT_REFRESH_SECRET_KEY=your_development_refresh_secret_key_change_in_prod
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - UPLOAD_DIR=/tmp/uploads
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgrespassword@db:5432/askver_db}
+      API_V1_STR: /api/v1
+      PROJECT_NAME: AskVer API
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev_secret_key_change_me}
+      JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY:-dev_refresh_secret_change_me}
+      ALGORITHM: HS256
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      UPLOAD_DIR: /tmp/uploads
     volumes:
-      - ./storage:/app/storage
-      - ./app:/app/app
+      - ../backend/storage:/app/storage
+      - ../backend/app:/app/app
     depends_on:
       db:
         condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ../frontendt
+      dockerfile: Dockerfile
+    container_name: askver_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    env_file:
+      - ../.env
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      - api
+    command: npm run dev -- --host 0.0.0.0 --port 5173
 
 volumes:
   postgres_data:

@@ -1,76 +1,88 @@
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
-from typing import Optional
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# Adjust the import path based on your project structure
-from services import chat_service 
+from app.core.database import get_db
+from app.schemas.chat import (
+    ApproveEditRequest,
+    ApproveEditResponse,
+    ChatQueryRequest,
+    ChatQueryResponse,
+    ProposeEditRequest,
+    ProposeEditResponse,
+)
+from app.services.chat_service import ChatService
 
 router = APIRouter(
     prefix="/deals/{deal_id}/chat",
-    tags=["Deal Chat & Edits"]
+    tags=["Deal Chat & Edits"],
 )
 
-# --- Pydantic Schemas ---
-
-class ChatQueryRequest(BaseModel):
-    query: str = Field(..., description="The user's question regarding the deal.")
-    user_id: Optional[str] = None 
-
-class ChatQueryResponse(BaseModel):
-    deal_id: str
-    answer: str
-
-class EditProposalRequest(BaseModel):
-    section_id: Optional[str] = Field(None, description="Specific section to edit, if applicable.")
-    instructions: str = Field(..., description="Natural language instructions for the edit.")
-    user_id: Optional[str] = None
-
-class EditProposalResponse(BaseModel):
-    deal_id: str
-    proposed_text: str
-    version_id: str
-    status: str
-
-# --- Endpoints ---
 
 @router.post("/query", response_model=ChatQueryResponse)
-async def ask_deal_query(deal_id: str, request: ChatQueryRequest):
-    """
-    Processes a natural language query about a specific deal.
-    """
+async def ask_deal_query(
+    deal_id: UUID,
+    request: ChatQueryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Processes a natural language query about a specific deal or the current report."""
     try:
-        answer = await chat_service.answer_deal_query(
-            deal_id=deal_id,
-            query=request.query
-        )
-        return ChatQueryResponse(deal_id=deal_id, answer=answer)
-        
-    except ValueError as ve:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process chat query.")
+        service = ChatService(db)
+        result = await service.answer_deal_query(deal_id=deal_id, question=request.question)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process chat query.",
+        ) from exc
 
-@router.post("/edit", response_model=EditProposalResponse)
-async def propose_text_edit(deal_id: str, request: EditProposalRequest):
-    """
-    Proposes a versioned edit to the deal's text based on chat instructions.
-    """
+
+@router.post("/edit", response_model=ProposeEditResponse)
+async def propose_text_edit(
+    deal_id: UUID,
+    request: ProposeEditRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generates a proposed revision for a specific report section or the full report."""
     try:
-        # Assuming the service returns a dict or object with the new text and version details
-        edit_result = await chat_service.propose_text_edit(
+        service = ChatService(db)
+        result = await service.propose_text_edit(
             deal_id=deal_id,
-            instructions=request.instructions,
-            section_id=request.section_id
+            instruction=request.instruction,
+            section=request.section,
+            current_text=request.current_text,
         )
-        
-        return EditProposalResponse(
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate text edit proposal.",
+        ) from exc
+
+
+@router.post("/approve", response_model=ApproveEditResponse)
+async def approve_text_edit(
+    deal_id: UUID,
+    request: ApproveEditRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accepts or rejects a proposed text edit for the deal and stores the human decision."""
+    try:
+        service = ChatService(db)
+        result = await service.approve_text_edit(
             deal_id=deal_id,
-            proposed_text=edit_result.get("proposed_text", ""),
-            version_id=edit_result.get("version_id", ""),
-            status="proposal_created"
+            proposed_diff_id=request.proposed_diff_id,
+            approved=request.approved,
         )
-        
-    except ValueError as ve:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate text edit proposal.")
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process edit approval.",
+        ) from exc
