@@ -53,8 +53,11 @@ async def init_db():
         )
         await conn.run_sync(Base.metadata.create_all)
 
-        print("✓ Created vector extension and database tables")
-        print("✓ Database initialized")
+    from app.core.database import ensure_meeting_schema_compatibility
+    await ensure_meeting_schema_compatibility()
+
+    print("✓ Created vector extension and database tables")
+    print("✓ Database initialized")
 
     await engine.dispose()
 

@@ -31,7 +31,9 @@ class Deal(Base):
     intelligence_snapshots = relationship(
         "DealIntelligence", back_populates="deal", cascade="all, delete-orphan"
     )
-    # ADDED: Link to client RFP/BRD deal documents
     documents = relationship(
         "DealDocument", back_populates="deal", cascade="all, delete-orphan"
+    )
+    meetings = relationship(
+        "Meeting", back_populates="deal", cascade="all, delete-orphan"
     )

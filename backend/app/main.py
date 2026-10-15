@@ -67,7 +67,7 @@ from sqlalchemy import text
 from agents.graph import configure_deal_intelligence_graph
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, ensure_meeting_schema_compatibility
 import app.db.models  # noqa: F401  # register all ORM models before create_all
 
 
@@ -85,6 +85,8 @@ async def lifespan(app: FastAPI):
         )
         # 2. Create tables
         await conn.run_sync(Base.metadata.create_all)
+
+    await ensure_meeting_schema_compatibility()
 
     checkpoint_url = settings.CHECKPOINT_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
 

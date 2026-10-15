@@ -12,6 +12,7 @@ import Login from './features/auth/Login'
 import DealList from './features/deals/DealList'
 import DealDashboard from './features/workflow/DealDashboard'
 import KnowledgeBasePage from './features/knowledge-base/KnowledgeBasePage'
+import DealMeetingAnalytics from './features/meetings/DealMeetingAnalytics'
 
 function AppRoutes() {
   const dispatch = useDispatch<AppDispatch>()
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route index element={<DealList />} />
         <Route path="knowledge-base" element={<KnowledgeBasePage />} />
         <Route path="deals/:dealId" element={<DealDashboard />} />
+        <Route path="deals/:dealId/meeting-analysis" element={<DealMeetingAnalytics />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

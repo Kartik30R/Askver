@@ -39,7 +39,7 @@ export const MainLayout = () => {
 
           <nav className="space-y-2">
             {navItems.map(({ label, path, icon: Icon }) => {
-              const active = location.pathname === path
+              const active = location.pathname === path || (path !== '/' && location.pathname.startsWith(path))
 
               return (
                 <button

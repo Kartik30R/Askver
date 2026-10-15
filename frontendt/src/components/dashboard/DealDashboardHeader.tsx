@@ -1,5 +1,6 @@
 import React from 'react'
 import {
+  BarChart3,
   FileText,
   GitGraph,
   PanelTop,
@@ -71,6 +72,15 @@ export default function DealDashboardHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => window.location.assign(`/deals/${dealId ?? ''}/meeting-analysis`)}
+          className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300 transition-colors hover:bg-cyan-500/15"
+          title="Open deal-linked meeting analysis"
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          Meeting Analysis
+        </button>
         <button
           type="button"
           onClick={onOpenDrawer}

@@ -18,5 +18,6 @@ class User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    # ADDED: Link to user's deals
     deals = relationship("Deal", back_populates="owner", cascade="all, delete-orphan")
+    meetings = relationship("Meeting", back_populates="owner", cascade="all, delete-orphan")
+    meeting_documents = relationship("MeetingDocument", back_populates="uploaded_by", cascade="all, delete-orphan")

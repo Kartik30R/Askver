@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -34,6 +35,27 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+
+async def ensure_meeting_schema_compatibility() -> None:
+    """Backfill required columns for existing databases created before the transcript-first meeting schema."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'meetings' AND column_name = 'transcript_text'
+                    ) THEN
+                        ALTER TABLE meetings ADD COLUMN transcript_text TEXT NOT NULL DEFAULT '';
+                    END IF;
+                END $$;
+                """
+            )
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -66,6 +66,11 @@ export default function DealList() {
     navigate(`/deals/${dealId}`)
   }
 
+  const handleOpenMeetingAnalysis = (dealId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    navigate(`/deals/${dealId}/meeting-analysis`)
+  }
+
   const draftDeals = deals.filter((d) => ['DRAFT', 'CREATED'].includes(d.status) || !d.status)
   const activeDeal = deals.filter((d) => ['RUNNING', 'PAUSED', 'PAUSED_FOR_HUMAN_REVIEW', 'AWAITING_REVIEW'].includes(d.status))
   const completedDeals = deals.filter((d) => ['COMPLETED', 'REJECTED', 'FAILED'].includes(d.status))
@@ -191,7 +196,7 @@ export default function DealList() {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-cosmic-border/30">
+                  <div className="mt-4 pt-3 border-t border-cosmic-border/30 space-y-2">
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -201,6 +206,13 @@ export default function DealList() {
                     >
                       <PlayCircle className="w-3.5 h-3.5" />
                       View Deal
+                    </button>
+                    <button
+                      onClick={(e) => handleOpenMeetingAnalysis(deal.id, e)}
+                      className="w-full px-3 py-1.5 text-xs font-medium text-white border border-cosmic-border hover:border-cyan-400 hover:text-cyan-300 rounded transition flex items-center justify-center gap-1"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      Meeting Analysis
                     </button>
                   </div>
                 </div>
@@ -249,7 +261,7 @@ export default function DealList() {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-cosmic-border/30">
+                  <div className="mt-4 pt-3 border-t border-cosmic-border/30 space-y-2">
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -258,6 +270,13 @@ export default function DealList() {
                       className="w-full px-3 py-1.5 text-xs font-medium text-white border border-cosmic-border hover:border-nagarro-green hover:text-nagarro-green rounded transition"
                     >
                       View Results
+                    </button>
+                    <button
+                      onClick={(e) => handleOpenMeetingAnalysis(deal.id, e)}
+                      className="w-full px-3 py-1.5 text-xs font-medium text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/10 rounded transition flex items-center justify-center gap-1"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      Meeting Analysis
                     </button>
                   </div>
                 </div>
