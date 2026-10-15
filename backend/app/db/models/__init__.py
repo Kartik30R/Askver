@@ -7,6 +7,9 @@ from .meeting import Meeting
 from .meeting_document import MeetingDocument
 from .user import User
 
+# Ensure research agent schema modules have app package visibility when imported.
+import app.agents.research  # noqa: F401
+
 __all__ = [
     "Deal",
     "DealDocument",

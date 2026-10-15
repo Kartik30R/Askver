@@ -8,6 +8,7 @@ from app.api.v1.controllers.meetings_controller import router as meetings_router
 from app.api.v1.controllers.pipeline_controller import router as pipeline_router
 from app.api.v1.controllers.reports_controller import router as reports_router
 from app.api.v1.controllers.chat_controller import router as chat_router
+from app.api.v1.controllers.meeting_analytics_controller import router as meeting_analytics_router
 
 api_router = APIRouter()
 
@@ -20,3 +21,4 @@ api_router.include_router(documents_router)
 api_router.include_router(pipeline_router)
 api_router.include_router(reports_router)
 api_router.include_router(chat_router)
+api_router.include_router(meeting_analytics_router)

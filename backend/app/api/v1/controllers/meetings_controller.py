@@ -1,13 +1,18 @@
+from pathlib import Path
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.db.models.meeting_document import MeetingDocument
 from app.db.models.user import User
-from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
+from app.schemas.meeting import MeetingCreate, MeetingDocumentResponse, MeetingResponse, MeetingUpdate
 from app.services.meeting_service import MeetingService
+
+UPLOAD_DIR = Path("./storage/uploads/meeting_documents").resolve()
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
 
@@ -91,6 +96,44 @@ async def update_meeting(
         summary=payload.summary,
     )
     return MeetingResponse.model_validate(updated)
+
+
+@router.post("/{meeting_id}/documents", response_model=MeetingDocumentResponse)
+async def upload_meeting_document(
+    meeting_id: UUID,
+    file: UploadFile = File(...),
+    document_type: str = Form("supporting_document"),
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    service = MeetingService(db)
+    await service.get_meeting(meeting_id, owner_id=current_user.id)
+
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File name is required")
+
+    safe_name = Path(file.filename).name
+    file_path = UPLOAD_DIR / f"{meeting_id}_{uuid4().hex}_{safe_name}"
+    content = await file.read()
+    file_path.write_bytes(content)
+
+    doc = MeetingDocument(
+        meeting_id=meeting_id,
+        document_type=document_type or "supporting_document",
+        original_filename=safe_name,
+        storage_path=str(file_path),
+        mime_type=file.content_type,
+        file_size_bytes=len(content),
+        status="UPLOADED",
+        extraction_status="PENDING",
+        indexing_status="PENDING",
+        uploaded_by_user_id=current_user.id,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+
+    return MeetingDocumentResponse.model_validate(doc)
 
 
 @router.delete("/{meeting_id}")
