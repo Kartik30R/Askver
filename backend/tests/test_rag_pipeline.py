@@ -245,6 +245,15 @@ def test_search_news_uses_direct_web_search_first(monkeypatch):
     assert results[0]["source_type"] == "WEB_SEARCH"
 
 
+def test_report_routes_do_not_expose_version_history_or_revert():
+    from app.api.v1.controllers import reports_controller
+
+    route_paths = {route.path for route in reports_controller.router.routes}
+
+    assert "/versions" not in route_paths
+    assert "/revert/{snapshot_id}" not in route_paths
+
+
 def test_checkpoint_serializer_allows_project_schema_types():
     allowed = get_allowed_msgpack_modules()
     assert ("app.schemas.node_1_company", "CompanyResearchSchema") in allowed

@@ -44,52 +44,6 @@ export type DynamicInstructionPayload = {
   priority?: number
 }
 
-export type ExecutionCheckpoint = {
-  checkpoint_id: string
-  node_name?: string | null
-  current_step?: string | null
-  timestamp?: string | null
-  paused?: boolean
-}
-
-export async function getExecutionHistory(
-  dealId: string,
-  accessToken?: string | null,
-): Promise<ExecutionCheckpoint[]> {
-  const payload = await fetchWithAuth<ExecutionCheckpoint[] | { timeline?: ExecutionCheckpoint[] }>(
-    `/deals/${dealId}/pipeline/execution/history`,
-    {
-      method: 'GET',
-      accessToken: accessToken ?? undefined,
-    },
-  )
-
-  if (Array.isArray(payload)) {
-    return payload
-  }
-
-  if (payload && typeof payload === 'object' && Array.isArray(payload.timeline)) {
-    return payload.timeline
-  }
-
-  return []
-}
-
-export async function resumeFromCheckpoint(
-  dealId: string,
-  checkpointId: string,
-  accessToken?: string | null,
-): Promise<{ success: boolean; message: string }> {
-  return fetchWithAuth<{ success: boolean; message: string }>(
-    `/deals/${dealId}/pipeline/execution/checkpoint/${checkpointId}/resume`,
-    {
-      method: 'POST',
-      body: JSON.stringify({}),
-      accessToken: accessToken ?? undefined,
-    },
-  )
-}
-
 export async function getPipelineState(
   dealId: string,
   accessToken?: string | null,

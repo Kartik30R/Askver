@@ -37,8 +37,6 @@ import {
 import type { AppDispatch, RootState } from '../../app/store'
 import {
   getLatestReport,
-  getReportVersions,
-  restoreReportVersion,
   type LatestReportResponse,
 } from './reportApi'
 import {
@@ -48,10 +46,8 @@ import {
   type ChatQueryResponse,
 } from './chatApi'
 import {
-  getExecutionHistory,
   getPipelineState,
   getPipelineStatus,
-  resumeFromCheckpoint,
   submitMandatoryReviewApproval,
 } from './workflowApi'
 import {
@@ -93,12 +89,6 @@ export default function DealDashboard() {
 
   // VS Code Drawer Toggle
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-
-  // Version Control Checkpoint Dropdown state
-  const [selectedCheckpoint, setSelectedCheckpoint] = useState('latest')
-  const [checkpointOptions, setCheckpointOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: 'latest', label: 'Head (Latest Checkpoint)' },
-  ])
   const [isDocumentsOpen, setIsDocumentsOpen] = useState(false)
   const [pipelineStatus, setPipelineStatus] = useState('UNKNOWN')
   const [dealDetails, setDealDetails] = useState<{ target_company?: string | null; target_industry?: string | null; meeting_objective?: string | null } | null>(null)
@@ -174,57 +164,6 @@ export default function DealDashboard() {
     } catch {
       dispatch(setPipelineState(null))
       setPipelineStatus('UNKNOWN')
-    }
-  }
-
-  const loadExecutionHistory = async () => {
-    if (!dealId) {
-      setCheckpointOptions([{ value: 'latest', label: 'Head (Latest Version)' }])
-      setSelectedCheckpoint('latest')
-      return
-    }
-
-    try {
-      const reportVersions = await getReportVersions(dealId, accessToken)
-      const options = [
-        { value: 'latest', label: 'Head (Latest Version)' },
-        ...reportVersions.map((version) => ({
-          value: version.snapshot_id,
-          label: `Version ${version.version} · ${new Date(version.updated_at ?? Date.now()).toLocaleString([], {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}`,
-        })),
-      ]
-      setCheckpointOptions(options)
-      if (!selectedCheckpoint || selectedCheckpoint === 'latest' || !options.some((option) => option.value === selectedCheckpoint)) {
-        setSelectedCheckpoint('latest')
-      }
-    } catch {
-      try {
-        const history = await getExecutionHistory(dealId, accessToken)
-        const options = [
-          { value: 'latest', label: 'Head (Latest Version)' },
-          ...history.map((checkpoint) => ({
-            value: checkpoint.checkpoint_id,
-            label: `${checkpoint.current_step || checkpoint.node_name || 'Checkpoint'} · ${new Date(checkpoint.timestamp ?? Date.now()).toLocaleString([], {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}`,
-          })),
-        ]
-        setCheckpointOptions(options)
-        if (!selectedCheckpoint || selectedCheckpoint === 'latest' || !options.some((option) => option.value === selectedCheckpoint)) {
-          setSelectedCheckpoint('latest')
-        }
-      } catch {
-        setCheckpointOptions([{ value: 'latest', label: 'Head (Latest Version)' }])
-        setSelectedCheckpoint('latest')
-      }
     }
   }
 
@@ -331,7 +270,6 @@ export default function DealDashboard() {
     void loadDocuments()
     void loadDealMeta()
     void loadPipelineState()
-    void loadExecutionHistory()
     void loadLatestReport()
   }, [dealId, accessToken])
 
@@ -390,28 +328,6 @@ export default function DealDashboard() {
       setDocumentError(error instanceof Error ? error.message : 'Unable to delete this deal.')
     } finally {
       setIsDeletingDeal(false)
-    }
-  }
-
-  const handleRestoreCheckpoint = async () => {
-    if (!dealId || !selectedCheckpoint || selectedCheckpoint === 'latest') return
-
-    try {
-      await restoreReportVersion(dealId, selectedCheckpoint, accessToken)
-      setSelectedCheckpoint('latest')
-      await loadPipelineState()
-      await loadLatestReport()
-      await loadExecutionHistory()
-    } catch (error) {
-      try {
-        await resumeFromCheckpoint(dealId, selectedCheckpoint, accessToken)
-        setSelectedCheckpoint('latest')
-        await loadPipelineState()
-        await loadLatestReport()
-        await loadExecutionHistory()
-      } catch (fallbackError) {
-        setDocumentError(fallbackError instanceof Error ? fallbackError.message : 'Unable to restore this version.')
-      }
     }
   }
 
@@ -2492,11 +2408,7 @@ export default function DealDashboard() {
         pipelineTitle={pipelineTitle}
         dealId={dealId}
         viewMode={viewMode}
-        selectedCheckpoint={selectedCheckpoint}
-        checkpointOptions={checkpointOptions}
         onChangeView={setViewMode}
-        onSelectedCheckpointChange={setSelectedCheckpoint}
-        onRestoreCheckpoint={handleRestoreCheckpoint}
         onOpenDrawer={() => setIsDrawerOpen(true)}
       />
 
