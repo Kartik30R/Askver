@@ -26,11 +26,14 @@ class MeetingAnalyticsService:
         self.deal_service = DealService(db)
 
     async def _latest_snapshot_data(self, deal_id: UUID) -> dict[str, Any]:
-        snapshot = await self.deal_service.intel_repo.get_latest_intelligence_snapshot(deal_id)
-        if snapshot is None:
+        context = await self.deal_service.get_deal_context(deal_id)
+        if not context:
             return {}
-        data = snapshot.snapshot_data or {}
-        return data if isinstance(data, dict) else {}
+
+        active_state = context.get("active_state") or {}
+        if not isinstance(active_state, dict):
+            return {}
+        return active_state
 
     async def _persist_meeting_analysis(self, *, deal_id: UUID, meeting_id: UUID, result: MeetingAnalysisResult) -> None:
         snapshot_data = await self._latest_snapshot_data(deal_id)
@@ -75,10 +78,10 @@ class MeetingAnalyticsService:
         snapshot_data = await self._latest_snapshot_data(deal_id)
         meeting_map = snapshot_data.get("meeting_analytics") or {}
         if not isinstance(meeting_map, dict):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No persisted meeting analysis found.")
+            meeting_map = {}
         payload = meeting_map.get(str(meeting_id))
         if payload is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No persisted meeting analysis found.")
+            return await self.analyze_meeting(deal_id=deal_id, meeting_id=meeting_id, owner_id=owner_id)
         return MeetingAnalysisResult.model_validate(payload)
 
     async def get_deal_analysis(self, *, deal_id: UUID, owner_id: UUID) -> DealAnalyticsResult:
@@ -86,7 +89,7 @@ class MeetingAnalyticsService:
         snapshot_data = await self._latest_snapshot_data(deal_id)
         payload = snapshot_data.get("deal_analytics")
         if payload is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No persisted deal analysis found.")
+            return await self.analyze_deal(deal_id=deal_id, owner_id=owner_id)
         return DealAnalyticsResult.model_validate(payload)
 
     async def _meeting_supporting_docs_text(self, meeting_id: UUID) -> str | None:
