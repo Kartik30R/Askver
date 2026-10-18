@@ -7,6 +7,7 @@ export type AuthUser = {
 
 export type AuthSession = {
   access_token: string
+  refresh_token: string
   token_type: string
   user: AuthUser
 }
@@ -54,13 +55,23 @@ export async function refreshAccessToken(): Promise<AuthSession | null> {
       const { setRefreshing } = await import('./authSlice')
       store.dispatch(setRefreshing(true))
 
-      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      const fallbackRefreshToken = typeof window !== 'undefined'
+        ? JSON.parse(window.localStorage.getItem('askver-auth') ?? '{}')?.refreshToken ?? null
+        : null
+
+      const requestOptions: RequestInit = {
         method: 'POST',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
-      })
+      }
+
+      if (fallbackRefreshToken) {
+        requestOptions.body = JSON.stringify({ refresh_token: fallbackRefreshToken })
+      }
+
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, requestOptions)
 
       if (!response.ok) {
         if (typeof document !== 'undefined') {

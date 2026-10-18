@@ -1,6 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
-import { ApiError, fetchCurrentUser, loginRequest, registerRequest, type AuthSession, type AuthUser } from './authApi'
+import {
+  ApiError,
+  fetchCurrentUser,
+  loginRequest,
+  refreshAccessToken,
+  registerRequest,
+  type AuthSession,
+  type AuthUser,
+} from './authApi'
 import type { RootState } from '../../app/store'
 
 const STORAGE_KEY = 'askver-auth'
@@ -8,33 +16,35 @@ const STORAGE_KEY = 'askver-auth'
 export type AuthState = {
   user: AuthUser | null
   accessToken: string | null
+  refreshToken: string | null
   status: 'idle' | 'loading' | 'succeeded' | 'failed'
   refreshing: boolean
   error: string | null
 }
 
-const readStoredSession = (): Pick<AuthState, 'user' | 'accessToken'> => {
+const readStoredSession = (): Pick<AuthState, 'user' | 'accessToken' | 'refreshToken'> => {
   if (typeof window === 'undefined') {
-    return { user: null, accessToken: null }
+    return { user: null, accessToken: null, refreshToken: null }
   }
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      return { user: null, accessToken: null }
+      return { user: null, accessToken: null, refreshToken: null }
     }
 
-    const parsed = JSON.parse(raw) as { user?: AuthUser | null; accessToken?: string | null }
+    const parsed = JSON.parse(raw) as { user?: AuthUser | null; accessToken?: string | null; refreshToken?: string | null }
     return {
       user: parsed.user ?? null,
       accessToken: parsed.accessToken ?? null,
+      refreshToken: parsed.refreshToken ?? null,
     }
   } catch {
-    return { user: null, accessToken: null }
+    return { user: null, accessToken: null, refreshToken: null }
   }
 }
 
-const persistSession = (user: AuthUser | null, accessToken: string | null) => {
+const persistSession = (user: AuthUser | null, accessToken: string | null, refreshToken: string | null = null) => {
   if (typeof window === 'undefined') {
     return
   }
@@ -49,6 +59,7 @@ const persistSession = (user: AuthUser | null, accessToken: string | null) => {
     JSON.stringify({
       user,
       accessToken,
+      refreshToken,
     }),
   )
 }
@@ -109,6 +120,22 @@ export const hydrateUserFromToken = createAsyncThunk<
       return await fetchCurrentUser(accessToken)
     } catch (error) {
       const status = error instanceof ApiError ? error.status : undefined
+
+      if (status === 401 || status === 403) {
+        const refreshed = await refreshAccessToken()
+        if (refreshed) {
+          try {
+            return await fetchCurrentUser(refreshed.access_token)
+          } catch (retryError) {
+            const retryStatus = retryError instanceof ApiError ? retryError.status : undefined
+            return rejectWithValue({
+              message: retryError instanceof Error ? retryError.message : 'Session check failed',
+              unauthorized: retryStatus === 401 || retryStatus === 403,
+            })
+          }
+        }
+      }
+
       return rejectWithValue({
         message: error instanceof Error ? error.message : 'Session check failed',
         unauthorized: status === 401 || status === 403,
@@ -124,10 +151,11 @@ const authSlice = createSlice({
     logout: (state) => {
       state.user = null
       state.accessToken = null
+      state.refreshToken = null
       state.status = 'idle'
       state.refreshing = false
       state.error = null
-      persistSession(null, null)
+      persistSession(null, null, null)
     },
     clearAuthError: (state) => {
       state.error = null
@@ -141,10 +169,11 @@ const authSlice = createSlice({
     establishSession: (state, action: PayloadAction<AuthSession>) => {
       state.user = action.payload.user
       state.accessToken = action.payload.access_token
+      state.refreshToken = action.payload.refresh_token
       state.status = 'succeeded'
       state.refreshing = false
       state.error = null
-      persistSession(action.payload.user, action.payload.access_token)
+      persistSession(action.payload.user, action.payload.access_token, action.payload.refresh_token)
     },
   },
   extraReducers: (builder) => {
@@ -156,9 +185,10 @@ const authSlice = createSlice({
       .addCase(loginUser.fulfilled, (state, action) => {
         state.user = action.payload.user
         state.accessToken = action.payload.access_token
+        state.refreshToken = action.payload.refresh_token
         state.status = 'succeeded'
         state.error = null
-        persistSession(action.payload.user, action.payload.access_token)
+        persistSession(action.payload.user, action.payload.access_token, action.payload.refresh_token)
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.status = 'failed'
@@ -171,9 +201,10 @@ const authSlice = createSlice({
       .addCase(registerUser.fulfilled, (state, action) => {
         state.user = action.payload.user
         state.accessToken = action.payload.access_token
+        state.refreshToken = action.payload.refresh_token
         state.status = 'succeeded'
         state.error = null
-        persistSession(action.payload.user, action.payload.access_token)
+        persistSession(action.payload.user, action.payload.access_token, action.payload.refresh_token)
       })
       .addCase(registerUser.rejected, (state, action) => {
         state.status = 'failed'
@@ -186,9 +217,10 @@ const authSlice = createSlice({
         if (!action.payload) {
           state.user = null
           state.accessToken = null
+          state.refreshToken = null
           state.status = 'succeeded'
           state.error = null
-          persistSession(null, null)
+          persistSession(null, null, null)
           return
         }
 
@@ -201,8 +233,9 @@ const authSlice = createSlice({
         if (action.payload?.unauthorized) {
           state.user = null
           state.accessToken = null
+          state.refreshToken = null
           state.error = action.payload.message
-          persistSession(null, null)
+          persistSession(null, null, null)
           return
         }
 

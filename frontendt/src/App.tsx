@@ -17,17 +17,10 @@ import DealMeetingAnalytics from './features/meetings/DealMeetingAnalytics'
 function AppRoutes() {
   const dispatch = useDispatch<AppDispatch>()
   const accessToken = useSelector((state: RootState) => state.auth.accessToken)
-  const hasAttemptedInitialRefresh = useRef(false)
 
   useEffect(() => {
     if (accessToken) {
       void dispatch(hydrateUserFromToken())
-      return
-    }
-
-    if (!hasAttemptedInitialRefresh.current && typeof document !== 'undefined' && document.cookie.includes('refresh_token=')) {
-      hasAttemptedInitialRefresh.current = true
-      void refreshAccessToken()
     }
   }, [accessToken, dispatch])
 

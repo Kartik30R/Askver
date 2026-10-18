@@ -778,6 +778,7 @@ export default function DealMeetingAnalytics() {
       } catch (err) {
         if (!run && isNotFound(err)) {
           setDealState('missing')
+          void fetchDealAnalysis(true)
         } else {
           setDealState('error')
           setDealError(errorText(err, 'Unable to load deal analytics.'))
