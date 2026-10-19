@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     # Default LLM provider selection
     LLM_PROVIDER: str = "gemini"
     LLM_MODEL: str = "gemini-3.5-flash-lite"
+    LLM_MODEL_CHEAP: str | None = None
+    LLM_MODEL_STRONG: str | None = None
     # "gemini-3.8-flash"
+
+    # Search provider configuration
+    TAVILY_API_KEY: str | None = None
 
     # NVIDIA NIM / OpenAI-compatible API
     NVIDIA_API_KEY: str | None = None

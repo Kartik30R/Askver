@@ -3,13 +3,17 @@ import logging
 from typing import List, Dict, Any
 
 from ddgs import DDGS
-from tavily import TavilyClient
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-TAVILY_API_KEY ="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"
+TAVILY_API_KEY = getattr(settings, "TAVILY_API_KEY", None)
+
+try:
+    from tavily import TavilyClient
+except ImportError:  # pragma: no cover - optional dependency
+    TavilyClient = None
 
 
 def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
@@ -20,7 +24,7 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     results = []
     
     # 1. Try Tavily Search First
-    if TAVILY_API_KEY:
+    if TAVILY_API_KEY and TavilyClient is not None:
         try:
             client = TavilyClient(api_key=TAVILY_API_KEY)
 

@@ -11,6 +11,14 @@ export type DealCreate = {
   meeting_objective: string
 }
 
+export type ResearchDepth = 'quick' | 'standard' | 'deep'
+
+export type StartPipelineOptions = {
+  threadId?: string
+  researchDepth?: ResearchDepth | string
+  meetingDurationMinutes?: number
+}
+
 export type DealSummary = {
   id: string
   title: string
@@ -207,20 +215,28 @@ export async function deleteDealDocument(
 export async function startPipeline(
   dealId: string,
   accessToken: string | null,
-  threadId?: string,
+  options: StartPipelineOptions = {},
 ): Promise<PipelineTriggerResponse> {
-  console.log('[💼 Deals API] POST /deals/{dealId}/pipeline/trigger', dealId)
+  const { threadId, researchDepth = 'standard', meetingDurationMinutes } = options
+  console.log('[💼 Deals API] POST /deals/{dealId}/pipeline/trigger', dealId, { researchDepth, meetingDurationMinutes })
 
-  const body: Record<string, unknown> = {}
+  const params = new URLSearchParams()
   if (threadId) {
-    body.thread_id = threadId
+    params.set('thread_id', threadId)
+  }
+  if (researchDepth) {
+    params.set('research_depth', String(researchDepth).toLowerCase())
+  }
+  if (meetingDurationMinutes != null) {
+    params.set('meeting_duration_minutes', String(meetingDurationMinutes))
   }
 
+  const suffix = params.toString()
+
   return fetchWithAuth<PipelineTriggerResponse>(
-    `/deals/${dealId}/pipeline/trigger`,
+    `/deals/${dealId}/pipeline/trigger${suffix ? `?${suffix}` : ''}`,
     {
       method: 'POST',
-      body: Object.keys(body).length > 0 ? JSON.stringify(body) : JSON.stringify({}),
       accessToken: accessToken ?? undefined,
     },
   )

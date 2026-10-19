@@ -28,6 +28,8 @@ class TriggerIntelligenceRequest(BaseModel):
     target_industry: str
     meeting_objective: str
     client_documents_path: Optional[str] = None
+    research_depth: Optional[str] = Field(default="standard", description="Research depth: quick, standard, deep")
+    meeting_duration_minutes: Optional[int] = Field(default=45, ge=15, le=180, description="Target meeting length in minutes")
 
 
 class HumanApprovalRequest(BaseModel):

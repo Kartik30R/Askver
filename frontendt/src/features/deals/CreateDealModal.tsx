@@ -13,6 +13,32 @@ interface CreateDealModalProps {
 }
 
 type StepStatus = 'incomplete' | 'completed' | 'current'
+type ResearchDepthOption = 'quick' | 'standard' | 'deep'
+
+const DEAL_SETTINGS_STORAGE_KEY = 'askver-deal-settings'
+
+const readStoredDealSettings = () => {
+  try {
+    if (typeof window === 'undefined') {
+      return { researchDepth: 'standard' as ResearchDepthOption, meetingDurationMinutes: 45 }
+    }
+
+    const raw = window.localStorage.getItem(DEAL_SETTINGS_STORAGE_KEY)
+    if (!raw) {
+      return { researchDepth: 'standard' as ResearchDepthOption, meetingDurationMinutes: 45 }
+    }
+
+    const parsed = JSON.parse(raw) as { researchDepth?: string; meetingDurationMinutes?: number }
+    const researchDepth = parsed.researchDepth === 'quick' || parsed.researchDepth === 'deep' ? parsed.researchDepth : 'standard'
+    const meetingDurationMinutes = parsed.meetingDurationMinutes === 30 || parsed.meetingDurationMinutes === 45 || parsed.meetingDurationMinutes === 60 || parsed.meetingDurationMinutes === 90
+      ? parsed.meetingDurationMinutes
+      : 45
+
+    return { researchDepth, meetingDurationMinutes }
+  } catch {
+    return { researchDepth: 'standard' as ResearchDepthOption, meetingDurationMinutes: 45 }
+  }
+}
 
 export default function CreateDealModal({ isOpen, onClose }: CreateDealModalProps) {
   const dispatch = useDispatch<AppDispatch>()
@@ -37,6 +63,18 @@ export default function CreateDealModal({ isOpen, onClose }: CreateDealModalProp
   const [dragActive, setDragActive] = useState(false)
   const [isUploadingDocs, setIsUploadingDocs] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [researchDepth, setResearchDepth] = useState<ResearchDepthOption>(() => readStoredDealSettings().researchDepth)
+  const [meetingDurationMinutes, setMeetingDurationMinutes] = useState<number>(() => readStoredDealSettings().meetingDurationMinutes)
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(DEAL_SETTINGS_STORAGE_KEY, JSON.stringify({ researchDepth, meetingDurationMinutes }))
+      }
+    } catch {
+      // Ignore storage access failures and keep the values in memory.
+    }
+  }, [researchDepth, meetingDurationMinutes])
 
   // Determine starting step when modal opens or draft changes
   useEffect(() => {
@@ -150,7 +188,11 @@ export default function CreateDealModal({ isOpen, onClose }: CreateDealModalProp
     if (!currentDraft?.id || startingPipeline) return
 
     try {
-      const resultAction = await dispatch(startDealWorkflow(currentDraft.id))
+      const resultAction = await dispatch(startDealWorkflow({
+        dealId: currentDraft.id,
+        researchDepth,
+        meetingDurationMinutes,
+      }))
       if (startDealWorkflow.fulfilled.match(resultAction)) {
         // Clear draft and close modal
         dispatch(setCurrentDraft(null))
@@ -458,6 +500,38 @@ export default function CreateDealModal({ isOpen, onClose }: CreateDealModalProp
                   <span className="text-cosmic-muted">Industry</span>
                   <p className="text-white font-medium">{formData.target_industry}</p>
                 </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 pt-2 text-left">
+              <div>
+                <label className="block text-xs font-medium text-cosmic-muted mb-1">Research depth</label>
+                <select
+                  value={researchDepth}
+                  onChange={(e) => setResearchDepth(e.target.value as ResearchDepthOption)}
+                  className="w-full bg-cosmic-bg border border-cosmic-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-nagarro-green"
+                >
+                  <option value="quick">Quick</option>
+                  <option value="standard">Standard</option>
+                  <option value="deep">Deep</option>
+                </select>
+                <p className="mt-1 text-[11px] text-cosmic-muted">
+                  Quick = fewer sources, fastest and cheapest. Standard = recommended. Deep = adds competitor analysis and more searching, uses more time and model calls.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-cosmic-muted mb-1">Meeting duration</label>
+                <select
+                  value={meetingDurationMinutes}
+                  onChange={(e) => setMeetingDurationMinutes(Number(e.target.value))}
+                  className="w-full bg-cosmic-bg border border-cosmic-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-nagarro-green"
+                >
+                  <option value={30}>30 minutes</option>
+                  <option value={45}>45 minutes</option>
+                  <option value={60}>60 minutes</option>
+                  <option value={90}>90 minutes</option>
+                </select>
               </div>
             </div>
 

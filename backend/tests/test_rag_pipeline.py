@@ -154,6 +154,24 @@ def test_route_after_review_decision_handles_pending_review_without_error():
     assert route_after_review_decision({"mandatory_review_checkpoint": "rejected"}) == "end"
 
 
+def test_pipeline_owner_guard_rejects_non_owner():
+    from app.api.v1.controllers.pipeline_controller import ensure_deal_owned_by_user
+    from uuid import uuid4
+    from fastapi import HTTPException
+
+    class DummyUser:
+        id = uuid4()
+
+    class DummyDeal:
+        owner_id = uuid4()
+
+    try:
+        ensure_deal_owned_by_user(DummyDeal(), DummyUser())
+        assert False, "Expected HTTP 403 for non-owner access"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+
+
 def test_approve_text_edit_updates_report_snapshot_for_active_version():
     proposal_id = uuid4()
     chat_service.ACTIVE_EDIT_PROPOSALS = {str(proposal_id): {

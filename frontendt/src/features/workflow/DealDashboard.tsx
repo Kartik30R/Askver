@@ -363,7 +363,8 @@ export default function DealDashboard() {
     enterprise_rag_matcher: ['enterprise_rag_matcher', 'matched_internal_assets', 'service_mappings', 'enterprise_rag'],
     service_mapper: ['service_mapper', 'service_mappings'],
     human_review_gate: ['human_review_gate', 'mandatory_review', 'mandatory_review_checkpoint', 'human_feedback', 'human_approved'],
-    cxo_brief_generator: ['cxo_brief_generator', 'cxo_brief', 'cxo_executive_brief'],
+    meeting_playbook: ['meeting_playbook', 'playbook', 'cxo_executive_brief', 'cxo_brief', 'cxo_brief_generator'],
+    cxo_brief_generator: ['cxo_brief_generator', 'cxo_brief', 'cxo_executive_brief', 'meeting_playbook'],
   }
 
   const getNodeAliasValue = (nodeId: string): unknown => {
@@ -2160,12 +2161,68 @@ export default function DealDashboard() {
   })()
 
   const cxoBriefPanel = (() => {
-    const brief = asRecord(pipelineState?.cxo_executive_brief ?? getNodeAliasValue('cxo_brief_generator'))
-    const executiveSummary = String(brief.executive_summary ?? 'Executive summary is not available yet.')
-    const executivePitch = String(brief.executive_pitch ?? 'No executive pitch available yet.')
-    const talkingPoints = Array.isArray(brief.talking_points) ? brief.talking_points.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
-    const questionsToAsk = Array.isArray(brief.questions_to_ask) ? brief.questions_to_ask.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
-    const objections = Array.isArray(brief.objections_and_responses) ? brief.objections_and_responses.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : []
+    const playbook = asRecord(pipelineState?.meeting_playbook ?? getNodeAliasValue('meeting_playbook') ?? pipelineState?.cxo_executive_brief ?? getNodeAliasValue('cxo_brief_generator'))
+
+    const extractLegacyBriefStrings = (brief: Record<string, unknown>) => {
+      const summary = typeof brief.executive_summary === 'string' ? brief.executive_summary : ''
+      const pitch = typeof brief.executive_pitch === 'string' ? brief.executive_pitch : ''
+      const talkingPoints = Array.isArray(brief.talking_points)
+        ? brief.talking_points.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : []
+      const questions = Array.isArray(brief.questions_to_ask)
+        ? brief.questions_to_ask.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : []
+      const objections = Array.isArray(brief.objections_and_responses)
+        ? brief.objections_and_responses.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        : []
+
+      return { summary, pitch, talkingPoints, questions, objections }
+    }
+
+    const meetingPlaybook = asRecord(playbook)
+    const snapshot = asRecord(meetingPlaybook.snapshot)
+    const roomPitch = asRecord(meetingPlaybook.pitch_and_ask)
+    const legacyBrief = extractLegacyBriefStrings(meetingPlaybook)
+
+    const talkingPoints = Array.isArray(meetingPlaybook.talking_points)
+      ? meetingPlaybook.talking_points
+          .map((item) => {
+            const point = asRecord(item)
+            const headline = typeof point.headline === 'string' ? point.headline.trim() : ''
+            const body = typeof point.point === 'string' ? point.point.trim() : ''
+            return headline && body ? `${headline}: ${body}` : headline || body
+          })
+          .filter((item): item is string => Boolean(item))
+      : legacyBrief.talkingPoints
+
+    const questionsToAsk = Array.isArray(meetingPlaybook.discovery_questions)
+      ? meetingPlaybook.discovery_questions
+          .map((item) => {
+            const question = asRecord(item)
+            return typeof question.question === 'string' ? question.question.trim() : ''
+          })
+          .filter((item): item is string => Boolean(item))
+      : legacyBrief.questions
+
+    const objections = Array.isArray(meetingPlaybook.objections)
+      ? meetingPlaybook.objections
+          .map((item) => {
+            const objection = asRecord(item)
+            return {
+              objection: String(objection.objection ?? 'Objection'),
+              response: String(objection.response ?? 'No response available.'),
+            }
+          })
+          .filter((item) => item.objection || item.response)
+      : legacyBrief.objections
+
+    const executiveSummary = String(
+      (typeof snapshot.situation === 'string' && snapshot.situation.trim()) || legacyBrief.summary || 'Executive summary is not available yet.',
+    )
+    const executivePitch = String(
+      (typeof roomPitch.pitch_60_seconds === 'string' && roomPitch.pitch_60_seconds.trim()) || legacyBrief.pitch || 'No executive pitch available yet.',
+    )
+
     const [openObjection, setOpenObjection] = useState<number | null>(0)
 
     const copyText = async (text: string, label: string) => {

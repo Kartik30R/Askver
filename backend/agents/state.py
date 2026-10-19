@@ -2,6 +2,8 @@ import operator
 from typing import Annotated, TypedDict, List, Dict, Optional
 from datetime import datetime
 
+from app.schemas.evidence import merge_facts, merge_sources
+
 # Import the strict Pydantic schemas
 from app.schemas.node_1_company import CompanyResearchSchema
 from app.schemas.node_1b_financial import FinancialIntelligenceSchema
@@ -45,9 +47,29 @@ class DealIntelligenceState(TypedDict):
     target_industry: str
     meeting_objective: str
     client_documents_path: Optional[str]
+    research_depth: Optional[str]
 
     # =====================================================================
-    # 2. STRICTLY TYPED AGENT OUTPUTS
+    # 2. RESEARCH LAYER OUTPUTS
+    # =====================================================================
+    research_plan: Optional[dict]
+    sources: Annotated[Dict[str, dict], merge_sources]
+    facts: Annotated[Dict[str, dict], merge_facts]
+    research_gaps: Annotated[Optional[List[str]], append_errors]
+    financial_snapshot: Optional[dict]
+    strategic_frameworks: Optional[dict]
+    commercial_frameworks: Optional[dict]
+    research_pass: Optional[int]
+    evidence_report: Optional[dict]
+    insight_synthesis: Optional[dict]
+    verification_report: Optional[dict]
+    playbook_questions: Optional[dict]
+    playbook_room: Optional[dict]
+    meeting_duration_minutes: Optional[int]
+    meeting_playbook: Optional[dict]
+
+    # =====================================================================
+    # 3. STRICTLY TYPED AGENT OUTPUTS
     # =====================================================================
     company_research: Optional[CompanyResearchSchema]
     financial_intelligence: Optional[FinancialIntelligenceSchema]

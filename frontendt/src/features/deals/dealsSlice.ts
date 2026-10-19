@@ -76,20 +76,24 @@ export const createNewDeal = createAsyncThunk<
 
 export const startDealWorkflow = createAsyncThunk<
   void,
-  string,
+  string | { dealId: string; researchDepth?: string; meetingDurationMinutes?: number },
   { state: RootState; rejectValue: string }
 >(
   'deals/startDealWorkflow',
-  async (dealId, { getState, rejectWithValue }) => {
+  async (payload, { getState, rejectWithValue }) => {
     const accessToken = getState().auth.accessToken
 
     if (!accessToken) {
       return rejectWithValue('Not authenticated')
     }
 
+    const dealId = typeof payload === 'string' ? payload : payload.dealId
+    const researchDepth = typeof payload === 'string' ? 'standard' : payload.researchDepth ?? 'standard'
+    const meetingDurationMinutes = typeof payload === 'string' ? 45 : payload.meetingDurationMinutes ?? 45
+
     try {
-      await startPipeline(dealId, accessToken)
-      console.log('[💼 dealsSlice] startDealWorkflow success', dealId)
+      await startPipeline(dealId, accessToken, { researchDepth, meetingDurationMinutes })
+      console.log('[💼 dealsSlice] startDealWorkflow success', dealId, { researchDepth, meetingDurationMinutes })
       return undefined
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start workflow'
