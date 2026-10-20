@@ -13,7 +13,6 @@ from app.schemas.hitl import WorkflowStateSnapshot
 from agents.graph import route_after_review_decision
 from agents.state import append_errors, append_instructions
 from agents.tools import financial_tool
-from agents.tools.search_tool import search_news
 from app.utils.checkpoint_serialization import get_allowed_msgpack_modules
 
 
@@ -138,18 +137,34 @@ def test_deal_service_hydrates_rerun_state_before_node_execution():
                 "category": "data",
             }],
         },
-        "matched_internal_assets": [],
+        "matched_internal_assets": [{
+            "asset_id": "A1",
+            "asset_name": "AI rollout deck",
+            "asset_type": "CASE_STUDY",
+            "relevance_score": 0.9,
+            "key_metrics_achieved": ["30% faster onboarding"],
+            "summary": "Implemented AI workflows",
+        }],
+        "service_mappings": [{
+            "client_need": "process automation",
+            "detected_bottleneck": "slow ops",
+            "recommended_offering": "managed workflow",
+            "supporting_proof_assets": [],
+            "expected_business_impact": "faster execution",
+        }],
     }
 
     hydrated = DealService._hydrate_run_state_static(state)
 
     assert hasattr(hydrated["priorities_and_pain_points"], "pain_points")
     assert hydrated["priorities_and_pain_points"].pain_points[0].title == "fragmented data"
+    assert hydrated["matched_internal_assets"][0].asset_name == "AI rollout deck"
+    assert hydrated["service_mappings"][0].client_need == "process automation"
 
 
 def test_route_after_review_decision_handles_pending_review_without_error():
     assert route_after_review_decision({"mandatory_review_checkpoint": "pending"}) == "wait_for_review"
-    assert route_after_review_decision({"mandatory_review_checkpoint": "approved"}) == "proceed_to_brief"
+    assert route_after_review_decision({"mandatory_review_checkpoint": "approved"}) == "playbook_questions"
     assert route_after_review_decision({"mandatory_review_checkpoint": "needs_revision"}) == "wait_for_review"
     assert route_after_review_decision({"mandatory_review_checkpoint": "rejected"}) == "end"
 
@@ -237,30 +252,6 @@ def test_get_company_financials_uses_actual_exchange_from_yahoo(monkeypatch):
 
     assert result["market"] == "NSE"
     assert "NSE" in result["ai_summary"]
-
-
-def test_search_news_uses_direct_web_search_first(monkeypatch):
-    class DummyDDGS:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def news(self, *args, **kwargs):
-            return []
-
-    monkeypatch.setattr("agents.tools.search_tool.DDGS", lambda: DummyDDGS())
-    monkeypatch.setattr(
-        "agents.tools.search_tool.search_web",
-        lambda *args, **kwargs: [{"title": "fallback", "url": "https://example.com", "snippet": "fallback snippet"}],
-    )
-
-    results = search_news("example query")
-
-    assert results
-    assert results[0]["title"] == "fallback"
-    assert results[0]["source_type"] == "WEB_SEARCH"
 
 
 def test_report_routes_do_not_expose_version_history_or_revert():

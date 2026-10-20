@@ -2,6 +2,7 @@ import React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MessageSquareCode, Send } from 'lucide-react'
+import { REPORT_SECTIONS } from '../../features/workflow/pipelineNodes'
 
 type ChatMessage = {
   role: 'user' | 'assistant'
@@ -144,11 +145,10 @@ export default function ReportChatPanel({
               onChange={(event) => onSectionChange(event.target.value)}
               className="flex-1 appearance-none rounded-md border border-cosmic-border bg-cosmic-bg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-nagarro-green"
             >
-              <option value="general" className="bg-cosmic-surface text-white">General chat</option>
-              <option value="cxo_executive_brief" className="bg-cosmic-surface text-white">CXO Executive Brief</option>
-              <option value="financial_intelligence" className="bg-cosmic-surface text-white">Financial Intelligence</option>
-              <option value="industry_analysis" className="bg-cosmic-surface text-white">Industry Analysis</option>
-              <option value="priorities_and_pain_points" className="bg-cosmic-surface text-white">Priorities & Pain Points</option>
+              <option value="" className="bg-cosmic-surface text-white">Entire report</option>
+              {REPORT_SECTIONS.map((s) => (
+                <option key={s} value={s} className="bg-cosmic-surface text-white">{s}</option>
+              ))}
             </select>
           </div>
           <p className="text-[10px] leading-5 text-cosmic-muted">

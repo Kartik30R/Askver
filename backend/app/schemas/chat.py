@@ -11,7 +11,7 @@ class ChatQueryResponse(BaseModel):
     citations: List[str] = Field(default_factory=list)
 
 class ProposeEditRequest(BaseModel):
-    section: Optional[str] = Field(None, description="Target workflow section or node, e.g. financial_intelligence or cxo_executive_brief")
+    section: Optional[str] = Field(None, description="Report section heading, e.g. 'Executive Snapshot', 'Pain Points', 'Discovery Questions'")
     instruction: str = Field(..., description="e.g., 'Rewrite the pitch to focus on AWS cloud migration'")
     current_text: Optional[str] = Field(None, description="Optional source text if caller wants to edit a specific section text")
 

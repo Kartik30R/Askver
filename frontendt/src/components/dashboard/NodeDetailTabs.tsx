@@ -1,5 +1,5 @@
 import React from 'react'
-import { CheckCircle2, Clock, Loader2, MessageSquareCode, X } from 'lucide-react'
+import { CheckCircle2, Clock3, Loader2, MessageSquareCode, X } from 'lucide-react'
 import type { PipelineNode } from './PipelineFlow'
 
 type NodeDetailTabsProps = {
@@ -10,7 +10,6 @@ type NodeDetailTabsProps = {
   financialPanel: React.ReactNode
   stakeholderPanel: React.ReactNode
   prioritiesPainPointsPanel: React.ReactNode
-  industryPanel: React.ReactNode
   solutionFitPanel: React.ReactNode
   cxoBriefPanel: React.ReactNode
   reviewFeedback: string
@@ -28,7 +27,6 @@ export default function NodeDetailTabs({
   financialPanel,
   stakeholderPanel,
   prioritiesPainPointsPanel,
-  industryPanel,
   solutionFitPanel,
   cxoBriefPanel,
   reviewFeedback,
@@ -39,51 +37,49 @@ export default function NodeDetailTabs({
 }: NodeDetailTabsProps) {
   return (
     <div className="cosmic-card overflow-hidden">
-      <div className="flex items-center bg-cosmic-bg border-b border-cosmic-border overflow-x-auto">
+      <div className="flex items-center overflow-x-auto border-b border-cosmic-border bg-cosmic-bg/60">
         {nodes.map((node) => (
           <button
             key={node.id}
             type="button"
             onClick={() => onSelectNode(node.id)}
-            className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-r border-cosmic-border whitespace-nowrap transition-all ${
+            className={`flex items-center gap-2 whitespace-nowrap border-r border-cosmic-border px-4 py-3 text-xs font-medium transition-all ${
               activeTabNode === node.id
-                ? 'bg-cosmic-surface text-nagarro-green border-t-2 border-t-nagarro-green'
-                : 'text-cosmic-muted hover:text-white hover:bg-cosmic-surface/50'
+                ? 'bg-cosmic-surface text-nagarro-green'
+                : 'text-cosmic-muted hover:bg-cosmic-surface/50 hover:text-white'
             }`}
           >
-            {node.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-nagarro-green" />}
-            {node.status === 'paused' && <Clock className="w-3.5 h-3.5 text-amber-400" />}
+            {node.status === 'completed' && <CheckCircle2 className="h-3.5 w-3.5 text-nagarro-green" />}
+            {node.status === 'paused' && <Clock3 className="h-3.5 w-3.5 text-amber-300" />}
             {node.label}
           </button>
         ))}
       </div>
 
-      <div className="p-6">
-        {activeTabNode === 'company_research' ? (
+      <div className="p-5 md:p-6">
+        {activeTabNode === 'research' ? (
           <div className="max-w-none text-sm">{companyResearchPanel}</div>
-        ) : activeTabNode === 'financial_intelligence' ? (
+        ) : activeTabNode === 'frameworks' ? (
           <div className="max-w-none text-sm">{financialPanel}</div>
-        ) : activeTabNode === 'stakeholder_intel' ? (
+        ) : activeTabNode === 'insights' ? (
           <div className="max-w-none text-sm">{stakeholderPanel}</div>
-        ) : activeTabNode === 'pain_point_detector' ? (
+        ) : activeTabNode === 'pain_points' ? (
           <div className="max-w-none text-sm">{prioritiesPainPointsPanel}</div>
-        ) : activeTabNode === 'industry_analysis' ? (
-          <div className="max-w-none text-sm">{industryPanel}</div>
-        ) : activeTabNode === 'service_mapper' ? (
+        ) : activeTabNode === 'solution_fit' ? (
           <div className="max-w-none text-sm">{solutionFitPanel}</div>
-        ) : activeTabNode === 'cxo_brief_generator' ? (
+        ) : activeTabNode === 'playbook' ? (
           <div className="max-w-none text-sm">{cxoBriefPanel}</div>
-        ) : activeTabNode === 'human_review_gate' ? (
+        ) : activeTabNode === 'review' ? (
           <div className="max-w-none text-sm">
             <div className="space-y-5">
               <div className="cosmic-card p-5 md:p-6">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.18em] text-cosmic-muted">Human review checkpoint</div>
-                    <h3 className="mt-2 text-2xl font-bold text-white">Review and approve the final brief</h3>
+                    <h3 className="mt-2 text-2xl font-bold text-white">Review the final brief</h3>
                   </div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-amber-300">
-                    <Clock className="h-3.5 w-3.5" />
+                    <Clock3 className="h-3.5 w-3.5" />
                     {String((pipelineState as Record<string, unknown> | null)?.mandatory_review_checkpoint ?? 'pending')}
                   </div>
                 </div>
@@ -147,9 +143,7 @@ export default function NodeDetailTabs({
             </div>
           </div>
         ) : (
-          <div className="prose prose-invert max-w-none text-sm">
-            {companyResearchPanel}
-          </div>
+          <div className="text-sm text-cosmic-muted">No panel for this stage.</div>
         )}
       </div>
     </div>

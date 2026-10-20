@@ -28,9 +28,6 @@ class Settings(BaseSettings):
     LLM_MODEL_STRONG: str | None = None
     # "gemini-3.8-flash"
 
-    # Search provider configuration
-    TAVILY_API_KEY: str | None = None
-
     # NVIDIA NIM / OpenAI-compatible API
     NVIDIA_API_KEY: str | None = None
     NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"

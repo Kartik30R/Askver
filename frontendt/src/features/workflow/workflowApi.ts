@@ -1,31 +1,63 @@
 import { fetchWithAuth } from '../../utils/fetchWithAuth'
+import type {
+  CommercialFrameworks,
+  EvidenceReport,
+  FactMap,
+  FinancialSnapshot,
+  InsightSynthesis,
+  MatchedAsset,
+  MeetingPlaybook,
+  PainPoint,
+  PipelineProgress,
+  ResearchPlan,
+  ServiceMapping,
+  SourceMap,
+  StrategicFrameworks,
+  VerificationReport,
+} from './researchTypes'
 
 export type PipelineStateResponse = {
   deal_id: string
   target_company?: string | null
   target_industry?: string | null
   meeting_objective?: string | null
+  research_depth?: string | null
+  meeting_duration_minutes?: number | null
   current_step?: string | null
   execution_paused_at?: string | null
   last_execution_resumption?: string | null
   pause_requested?: boolean
   manual_pause_at_node?: string | null
-  dynamic_instructions?: string[] | null
+  dynamic_instructions?: Array<string | Record<string, unknown>> | null
   mandatory_review_checkpoint?: string | null
   human_approved?: boolean
   human_feedback?: string | null
-  company_overview?: Record<string, unknown> | null
-  financial_intelligence?: Record<string, unknown> | null
-  stakeholder_intelligence?: Record<string, unknown> | null
-  industry_analysis?: Record<string, unknown> | null
+
+  research_plan?: ResearchPlan | null
+  facts?: FactMap | null
+  sources?: SourceMap | null
+  research_gaps?: string[] | null
+  financial_snapshot?: FinancialSnapshot | null
+  strategic_frameworks?: StrategicFrameworks | null
+  commercial_frameworks?: CommercialFrameworks | null
+  evidence_report?: EvidenceReport | null
+  insight_synthesis?: InsightSynthesis | null
+  verification_report?: VerificationReport | null
+
   priorities?: string[] | null
-  detected_pain_points?: Array<Record<string, unknown>> | null
-  service_mappings?: Array<Record<string, unknown>> | null
-  matched_internal_assets?: Array<Record<string, unknown>> | null
-  cxo_executive_brief?: Record<string, unknown> | null
+  detected_pain_points?: PainPoint[] | null
+  service_mappings?: ServiceMapping[] | null
+  matched_internal_assets?: MatchedAsset[] | null
+
+  meeting_playbook?: MeetingPlaybook | null
+  cxo_executive_brief?: Record<string, unknown> | null // back-compat only, do not render
   markdown_export?: string | null
+
+  progress?: PipelineProgress | null
   node_statuses?: Record<string, string>
   errors?: string[] | null
+  // legacy deals (pre-upgrade snapshots) may still carry these; only used to detect "legacy"
+  company_research?: unknown
   [key: string]: unknown
 }
 
@@ -33,7 +65,6 @@ export type MandatoryReviewApprovalPayload = {
   checkpoint_status: 'approved' | 'needs_revision' | 'rejected'
   feedback?: string | null
   custom_selected_assets?: string[] | null
-  executive_brief_modifications?: Record<string, unknown> | null
 }
 
 export type DynamicInstructionPayload = {

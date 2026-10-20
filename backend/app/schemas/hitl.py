@@ -85,7 +85,7 @@ class MandatoryReviewApprovalRequest(BaseModel):
     )
     executive_brief_modifications: Optional[Dict[str, Any]] = Field(
         None,
-        description="Specific modifications to make to the executive brief sections"
+        description="Deprecated, ignored"
     )
 
 
@@ -118,11 +118,22 @@ class WorkflowStateSnapshot(BaseModel):
     target_company: Optional[str] = None
     target_industry: Optional[str] = None
     meeting_objective: Optional[str] = None
+    research_depth: Optional[str] = None
+    meeting_duration_minutes: Optional[int] = None
+    research_plan: Optional[Dict[str, Any]] = None
+    sources: Optional[Dict[str, Any]] = None
+    facts: Optional[Dict[str, Any]] = None
+    research_gaps: Optional[List[str]] = None
+    financial_snapshot: Optional[Dict[str, Any]] = None
+    strategic_frameworks: Optional[Dict[str, Any]] = None
+    commercial_frameworks: Optional[Dict[str, Any]] = None
+    evidence_report: Optional[Dict[str, Any]] = None
+    insight_synthesis: Optional[Dict[str, Any]] = None
+    verification_report: Optional[Dict[str, Any]] = None
+    meeting_playbook: Optional[Dict[str, Any]] = None
+    progress: Optional[Dict[str, Any]] = None
+    markdown_export: Optional[str] = None
 
-    company_overview: Optional[Dict[str, Any]] = None
-    financial_intelligence: Optional[Dict[str, Any]] = None
-    stakeholder_intelligence: Optional[Dict[str, Any]] = None
-    industry_analysis: Optional[Dict[str, Any]] = None
     priorities: Optional[List[Any]] = None
     detected_pain_points: Optional[List[Any]] = None
     service_mappings: Optional[List[Any]] = None

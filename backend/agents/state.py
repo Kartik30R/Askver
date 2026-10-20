@@ -5,14 +5,8 @@ from datetime import datetime
 from app.schemas.evidence import merge_facts, merge_sources
 
 # Import the strict Pydantic schemas
-from app.schemas.node_1_company import CompanyResearchSchema
-from app.schemas.node_1b_financial import FinancialIntelligenceSchema
-from app.schemas.node_2_stakeholder import StakeholderIntelligenceSchema
-from app.schemas.node_3_industry import IndustryAnalysisSchema
 from app.schemas.node_4_priorities import BusinessPrioritiesSchema
 from app.schemas.node_5_6_services import MatchedAssetSchema, ServiceMappingSchema
-from app.schemas.node_7_brief import MeetingStrategySchema
-from app.schemas.node_7_brief import CXOExecutiveBriefSchema
 
 
 def append_instructions(existing, new):
@@ -71,15 +65,12 @@ class DealIntelligenceState(TypedDict):
     # =====================================================================
     # 3. STRICTLY TYPED AGENT OUTPUTS
     # =====================================================================
-    company_research: Optional[CompanyResearchSchema]
-    financial_intelligence: Optional[FinancialIntelligenceSchema]
-    stakeholder_intelligence: Optional[StakeholderIntelligenceSchema]
-    industry_analysis: Optional[IndustryAnalysisSchema]
     priorities_and_pain_points: Optional[BusinessPrioritiesSchema]
     matched_internal_assets: Optional[List[MatchedAssetSchema]]
     service_mappings: Optional[List[ServiceMappingSchema]]
-    cxo_executive_brief: Optional[CXOExecutiveBriefSchema]
-    
+    # back-compat thin brief derived from meeting_playbook by playbook_assemble (plain dict, no schema)
+    cxo_executive_brief: Optional[dict]
+
     markdown_export: Optional[str]
 
     # =====================================================================

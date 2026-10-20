@@ -464,9 +464,19 @@ class HITLManager:
         deal = await self._deal(deal_id)
         config = await self._config(deal_id)
 
+        from app.services.deal_service import RERUN_ORDER
+
+        allowed_nodes = set(RERUN_ORDER + ["mandatory_review"])
         target_nodes = list(request.target_nodes or [])
         if request.apply_to_node and not target_nodes:
             target_nodes = [request.apply_to_node]
+        if request.apply_to_node and request.apply_to_node not in allowed_nodes:
+            raise ValueError(f"Invalid apply_to_node '{request.apply_to_node}'. Valid: {', '.join(sorted(allowed_nodes))}")
+        invalid_targets = [n for n in target_nodes if n not in allowed_nodes]
+        if invalid_targets:
+            raise ValueError(f"Invalid target node(s): {', '.join(invalid_targets)}. Valid: {', '.join(sorted(allowed_nodes))}")
+        if request.rerun_from_node and request.rerun_from_node not in allowed_nodes:
+            raise ValueError(f"Invalid rerun_from_node '{request.rerun_from_node}'. Valid: {', '.join(sorted(allowed_nodes))}")
 
         # Keep rerun selection independent from the actual instruction target list.
         # The rerun node controls where the workflow resumes; target_nodes controls
@@ -543,16 +553,6 @@ class HITLManager:
             "human_feedback": request.feedback or values.get("human_feedback"),
             "custom_selected_assets": request.custom_selected_assets or values.get("custom_selected_assets"),
         }
-        if request.executive_brief_modifications:
-            # The brief doesn't exist yet; pass the edits to the CXO node as steering instructions.
-            patch["dynamic_instructions"] = [
-                {
-                    "text": "Reviewer edits to apply to the executive brief: "
-                    + json.dumps(request.executive_brief_modifications, default=str),
-                    "target_nodes": ["cxo_brief_generator"],
-                }
-            ]
-
         await graph.aupdate_state(config, patch, as_node="service_mapper")   # next node stays mandatory_review
 
         should_run = status in (CheckpointStatus.APPROVED, CheckpointStatus.REJECTED)
@@ -570,18 +570,7 @@ class HITLManager:
         if not snapshot:
             raise ValueError(f"No workflow found for deal {deal_id}")
         s = snapshot.snapshot_data or {}
-        return {
-            "deal_id": str(deal_id),
-            "current_step": s.get("current_step"),
-            "execution_paused_at": s.get("execution_paused_at"),
-            "last_execution_resumption": s.get("last_execution_resumption"),
-            "pause_requested": s.get("pause_requested", False),
-            "dynamic_instructions": s.get("dynamic_instructions"),
-            "mandatory_review_checkpoint": s.get("mandatory_review_checkpoint", "pending"),
-            "human_approved": s.get("human_approved", False),
-            "human_feedback": s.get("human_feedback"),
-            "available_assets": len(s.get("matched_internal_assets") or []),
-            "available_service_mappings": len(s.get("service_mappings") or []),
-            "node_statuses": s.get("node_statuses") or {},
-            "errors": s.get("errors"),
-        }
+        from app.services.deal_service import DealService
+        mapped = DealService.map_state_to_api_response(s)
+        mapped["deal_id"] = str(deal_id)
+        return mapped

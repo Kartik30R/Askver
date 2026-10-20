@@ -9,22 +9,28 @@ from app.repositories.deal_repository import DealRepository
 from app.repositories.deal_intelligence_repository import DealIntelligenceRepository
 from app.repositories.execution_history_repository import ExecutionHistoryRepository
 from app.schemas.deal_intelligence import HumanApprovalRequest
+from app.schemas.evidence import merge_facts, merge_sources
 from app.schemas.playbook import MeetingPlaybook
 from agents.graph import get_deal_intelligence_graph
-from agents.nodes.company_research import company_research_node
-from agents.nodes.cxo_brief_synthesizer import cxo_brief_generator_node
-from agents.nodes.enterprise_rag_matcher import enterprise_rag_matcher_node
-from agents.nodes.financial_intelligence import financial_intelligence_node
-from agents.nodes.industry_analysis import industry_analysis_node
-from agents.nodes.pain_point_detector import pain_point_detector_node
-from agents.nodes.report_indexer import report_indexer_node
-from agents.nodes.service_mapper import service_mapper_node
-from agents.nodes.stakeholder_intelligence import stakeholder_intelligence_node
+from agents.state import append_errors, merge_statuses
 from app.services.hitl_manager import HITLManager
 from app.services.execution_history_service import ExecutionHistoryService
 from app.schemas.deals import DealCreate
 from app.utils.serializers import to_primitive
-from agents.graph import _hydrate
+
+
+RERUN_ORDER = [
+    "research_planner",
+    "research_business_model", "research_financial", "research_strategy", "research_technology",
+    "research_leadership", "research_industry", "research_competitors", "research_triggers",
+    "evidence_gate",
+    "strategic_frameworks", "commercial_frameworks",
+    "insight_synthesis", "verifier", "pain_point_detector",
+    "enterprise_rag", "service_mapper",
+    "playbook_questions", "playbook_room", "playbook_assemble",
+    "report_indexing",
+]
+SPECIALIST_NODES = {n for n in RERUN_ORDER if n.startswith("research_") and n != "research_planner"}
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +56,11 @@ class DealService:
         ("Research", [
             "research_business_model", "research_financial", "research_strategy",
             "research_technology", "research_leadership", "research_industry",
-            "research_competitors", "research_triggers",
+            "research_competitors", "research_triggers", "evidence_gate"
         ]),
-        ("Evidence check", ["evidence_gate", "research_refine"]),
         ("Analysis", ["strategic_frameworks", "commercial_frameworks", "insight_synthesis", "verifier"]),
-        ("Pain points & solutions", ["pain_point_detector", "enterprise_rag", "service_mapper"]),
-        ("Human review", ["mandatory_review"]),
+        ("Pain points & fit", ["pain_point_detector", "enterprise_rag", "service_mapper"]),
+        ("Review", ["mandatory_review"]),
         ("Playbook", ["playbook_questions", "playbook_room", "playbook_assemble", "report_indexing"]),
     ]
     DONE = {"COMPLETED", "FAILED"}
@@ -143,41 +148,71 @@ class DealService:
     @staticmethod
     def map_state_to_api_response(state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         s = dict(state or {})
-        payload: Dict[str, Any] = {}
+        payload: Dict[str, Any] = {
+            "deal_id": s.get("deal_id"),
+            "target_company": s.get("target_company"),
+            "target_industry": s.get("target_industry"),
+            "meeting_objective": s.get("meeting_objective"),
+            "research_depth": s.get("research_depth"),
+            "meeting_duration_minutes": s.get("meeting_duration_minutes"),
+            "research_plan": s.get("research_plan") or s.get("research_planner"),
+            "facts": s.get("facts"),
+            "sources": s.get("sources"),
+            "research_gaps": s.get("research_gaps"),
+            "financial_snapshot": s.get("financial_snapshot"),
+            "strategic_frameworks": s.get("strategic_frameworks"),
+            "commercial_frameworks": s.get("commercial_frameworks"),
+            "evidence_report": s.get("evidence_report"),
+            "insight_synthesis": s.get("insight_synthesis"),
+            "verification_report": s.get("verification_report"),
+            "priorities": [],
+            "detected_pain_points": [],
+            "priorities_and_pain_points": s.get("priorities_and_pain_points"),
+            "service_mappings": s.get("service_mappings"),
+            "matched_internal_assets": s.get("matched_internal_assets"),
+            "meeting_playbook": s.get("meeting_playbook"),
+            "cxo_executive_brief": s.get("cxo_executive_brief"),
+            "markdown_export": s.get("markdown_export"),
+            "node_statuses": s.get("node_statuses") or {},
+            "errors": s.get("errors"),
+            "progress": DealService.compute_progress(s),
+            "current_step": s.get("current_step"),
+            "mandatory_review_checkpoint": s.get("mandatory_review_checkpoint", "pending"),
+            "human_approved": bool(s.get("human_approved", False)),
+            "human_feedback": s.get("human_feedback"),
+            "pause_requested": bool(s.get("pause_requested", False)),
+            "manual_pause_at_node": s.get("manual_pause_at_node"),
+            "dynamic_instructions": s.get("dynamic_instructions"),
+            "execution_paused_at": s.get("execution_paused_at"),
+            "last_execution_resumption": s.get("last_execution_resumption"),
+        }
+
+        priorities_block = s.get("priorities_and_pain_points") or {}
+        if hasattr(priorities_block, "priorities"):
+            payload["priorities"] = list(getattr(priorities_block, "priorities") or [])
+            payload["detected_pain_points"] = list(getattr(priorities_block, "pain_points") or [])
+            payload["priorities_and_pain_points"] = priorities_block.model_dump() if hasattr(priorities_block, "model_dump") else priorities_block
+        elif isinstance(priorities_block, dict):
+            payload["priorities"] = list(priorities_block.get("priorities") or [])
+            payload["detected_pain_points"] = list(priorities_block.get("pain_points") or [])
+            payload["priorities_and_pain_points"] = priorities_block
+
         for key in [
             "meeting_playbook", "verification_report", "insight_synthesis", "strategic_frameworks",
             "commercial_frameworks", "research_plan", "evidence_report", "research_gaps",
-            "financial_snapshot", "priorities_and_pain_points", "company_research",
-            "financial_intelligence", "stakeholder_intelligence", "industry_analysis",
-            "matched_internal_assets", "service_mappings", "cxo_executive_brief",
-            "markdown_export", "meeting_duration_minutes", "research_depth",
+            "financial_snapshot", "matched_internal_assets", "service_mappings",
+            "cxo_executive_brief", "markdown_export", "meeting_duration_minutes", "research_depth",
         ]:
             if key in s and s.get(key) not in (None, "", [], {}):
                 payload[key] = s[key]
-        if s.get("meeting_playbook"):
-            payload["citations"] = DealService.build_citations_map(s, [
-                item_id
-                for item in [
-                    (s.get("meeting_playbook") or {}).get("talking_points", []),
-                    (s.get("meeting_playbook") or {}).get("discovery_questions", []),
-                    (s.get("meeting_playbook") or {}).get("objections", []),
-                    (s.get("meeting_playbook") or {}).get("attendees", []),
-                    (s.get("meeting_playbook") or {}).get("proof_points", []),
-                    (s.get("meeting_playbook") or {}).get("pitch_and_ask", {}).get("fact_ids", []),
-                ]
-                for item in (item if isinstance(item, list) else [item])
-                for item_id in ((item.get("fact_ids", []) if isinstance(item, dict) else []) or [])
-            ])
-            payload["playbook_warning"] = bool(
-                ((s.get("meeting_playbook") or {}).get("overall_confidence") == "LOW")
-                or any((item.get("unverified_figures") or []) for item in ((s.get("meeting_playbook") or {}).get("talking_points", []) if isinstance((s.get("meeting_playbook") or {}).get("talking_points", []), list) else []))
-            )
-            payload["meeting_playbook_warning"] = payload["playbook_warning"]
-        if s.get("verification_report"):
-            payload["verification_report"] = s["verification_report"]
-            payload["verification_warning"] = bool((s["verification_report"].get("overall_confidence") == "LOW") if isinstance(s["verification_report"], dict) else False)
+
         if s.get("research_planner") is not None and isinstance(s.get("research_planner"), dict):
             payload["research_plan"] = s["research_planner"]
+
+        if s.get("meeting_playbook") and isinstance(s.get("meeting_playbook"), dict):
+            payload["citations"] = DealService.build_citations_map(s)
+            payload["playbook_warning"] = bool((s["meeting_playbook"].get("overall_confidence") == "LOW") if isinstance(s["meeting_playbook"], dict) else False)
+            payload["meeting_playbook_warning"] = payload["playbook_warning"]
         return payload
 
     async def _persist(self, deal_id, thread_id, values: dict, final: Optional[str] = None):
@@ -276,7 +311,8 @@ class DealService:
 
     @staticmethod
     def _hydrate_run_state_static(state: Dict[str, Any]) -> Dict[str, Any]:
-        return _hydrate(state)
+        from agents.graph import _hydrate
+        return _hydrate(dict(state or {}))
 
     def _hydrate_run_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         return self._hydrate_run_state_static(state)
@@ -295,50 +331,50 @@ class DealService:
         state["current_step"] = f"RUNNING: {node_name}"
         state["rerun_from_node"] = None
 
-        node_order = [
-            "company_research",
-            "financial_intelligence",
-            "stakeholder_intel",
-            "industry_analysis",
-            "pain_point_detector",
-            "enterprise_rag_matcher",
-            "service_mapper",
-            "mandatory_review",
-            "cxo_brief_generator",
-            "report_indexer",
-        ]
-        if node_name not in node_order:
-            raise ValueError(f"Unknown rerun node: {node_name}")
+        if node_name not in RERUN_ORDER:
+            raise ValueError(f"Unknown node '{node_name}'. Valid: {', '.join(RERUN_ORDER)}")
+        start_index = RERUN_ORDER.index(node_name)
 
-        start_index = node_order.index(node_name)
         prior_statuses = dict((state.get("node_statuses") or {}).items())
-        for name in node_order:
-            if name in node_order[start_index:]:
+        for name in RERUN_ORDER:
+            if name in RERUN_ORDER[start_index:]:
                 prior_statuses.pop(name, None)
             else:
                 prior_statuses[name] = prior_statuses.get(name) or "COMPLETED"
         state["node_statuses"] = prior_statuses
 
-        for name in node_order[start_index:]:
+        from agents import graph as _g
+        node_fn = {name: fn for name, fn in _g.SPECIALISTS}
+        node_fn.update({
+            "research_planner": _g.research_planner_node,
+            "evidence_gate": _g.evidence_gate_node,
+            "strategic_frameworks": _g.strategic_frameworks_node,
+            "commercial_frameworks": _g.commercial_frameworks_node,
+            "insight_synthesis": _g.insight_synthesis_node,
+            "verifier": _g.verifier_node,
+            "pain_point_detector": _g.pain_point_detector_node,
+            "enterprise_rag": _g.enterprise_rag_matcher_node,
+            "service_mapper": _g.service_mapper_node,
+            "playbook_questions": _g.playbook_questions_node,
+            "playbook_room": _g.playbook_room_node,
+            "playbook_assemble": _g.playbook_assemble_node,
+            "report_indexing": _g.report_indexer_node,
+        })
+
+        specialist_only = node_name in SPECIALIST_NODES
+        for name in RERUN_ORDER[start_index:]:
             state.setdefault("node_statuses", {})
             state["node_statuses"].pop(name, None)
             if name in state:
                 state.pop(name, None)
 
-            node_fn = {
-                "company_research": company_research_node,
-                "financial_intelligence": financial_intelligence_node,
-                "stakeholder_intel": stakeholder_intelligence_node,
-                "industry_analysis": industry_analysis_node,
-                "pain_point_detector": pain_point_detector_node,
-                "enterprise_rag_matcher": enterprise_rag_matcher_node,
-                "service_mapper": service_mapper_node,
-                "mandatory_review": None,
-                "cxo_brief_generator": cxo_brief_generator_node,
-                "report_indexer": report_indexer_node,
-            }.get(name)
+            if specialist_only and name.startswith("research_") and name != node_name:
+                continue
+            if name == "playbook_questions" and state.get("mandatory_review_checkpoint") != "approved":
+                break
 
-            if node_fn is None:
+            fn = node_fn.get(name)
+            if fn is None:
                 if name == "mandatory_review":
                     state["mandatory_review_checkpoint"] = state.get("mandatory_review_checkpoint", "pending")
                     state["node_statuses"][name] = "AWAITING_REVIEW"
@@ -350,11 +386,20 @@ class DealService:
 
             try:
                 hydrated_state = self._hydrate_run_state(state)
-                update = dict(node_fn(hydrated_state) or {})
-                for key, value in update.items():
-                    if not key.startswith("_"):
+                update = dict(fn(hydrated_state) or {})
+                for key, value in list(update.items()):
+                    if key.startswith("_"):
+                        continue
+                    if key == "facts":
+                        state["facts"] = merge_facts(state.get("facts"), value)
+                    elif key == "sources":
+                        state["sources"] = merge_sources(state.get("sources"), value)
+                    elif key == "node_statuses":
+                        state["node_statuses"] = merge_statuses(state.get("node_statuses", {}), value)
+                    elif key in {"errors", "research_gaps"}:
+                        state[key] = append_errors(state.get(key), value)
+                    else:
                         state[key] = value
-                state["node_statuses"] = {**state.get("node_statuses", {}), **(update.get("node_statuses") or {})}
                 state["current_step"] = f"RUNNING: {name}"
                 await self._persist(deal_id, thread_id or (latest.thread_id if latest else f"deal_{deal_id}"), state)
                 await self.db.refresh(deal)

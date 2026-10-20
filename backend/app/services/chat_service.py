@@ -55,6 +55,18 @@ class ChatService:
                     answer = self._extract_section(report_text, "Executive")
                 elif "pain" in question_lower or "priority" in question_lower:
                     answer = self._extract_section(report_text, "Pain")
+                elif "objection" in question_lower:
+                    answer = self._extract_section(report_text, "Objections")
+                elif "question" in question_lower or "discovery" in question_lower:
+                    answer = self._extract_section(report_text, "Discovery Questions")
+                elif "risk" in question_lower:
+                    answer = self._extract_section(report_text, "Deal Risks")
+                elif "agenda" in question_lower:
+                    answer = self._extract_section(report_text, "Agenda")
+                elif "pitch" in question_lower:
+                    answer = self._extract_section(report_text, "Pitch")
+                elif "talking" in question_lower:
+                    answer = self._extract_section(report_text, "Talking Points")
                 else:
                     answer = self._summarize_report(report_text, normalized)
 
@@ -168,7 +180,21 @@ class ChatService:
                         name = item.get("asset_name") or item.get("title") or item.get("client_need")
                         if name:
                             citations.append(str(name))
-        return list(dict.fromkeys(citations))
+        playbook = state.get("meeting_playbook") or {}
+        facts = state.get("facts") or {}
+        if isinstance(playbook, dict):
+            for fact_ids in playbook.get("fact_ids", []):
+                if not isinstance(fact_ids, list):
+                    continue
+                for fact_id in fact_ids[:10]:
+                    fact = facts.get(fact_id)
+                    if isinstance(fact, dict):
+                        for source_id in fact.get("source_ids") or []:
+                            source = (state.get("sources") or {}).get(source_id) or {}
+                            title = source.get("title")
+                            if title:
+                                citations.append(str(title))
+        return list(dict.fromkeys(citations))[:10]
 
     def _extract_section(self, report_text: str, heading: str) -> str:
         normalized = report_text.replace("\r", "")
@@ -183,16 +209,10 @@ class ChatService:
         return normalized[start:end][:1200]
 
     def _extract_section_text_for_edit(self, state: Dict[str, Any], section: Optional[str]) -> str:
+        report = self._extract_report_text(state)
         if not section:
-            return self._extract_report_text(state)
-
-        if isinstance(state.get(section), dict):
-            return str(state.get(section))
-        if section == "cxo_executive_brief":
-            return str(state.get("cxo_executive_brief") or "")
-        if section == "financial_intelligence":
-            return str(state.get("financial_intelligence") or "")
-        return self._extract_report_text(state)
+            return report
+        return self._extract_section(report, section) or report
 
     def _summarize_report(self, report_text: str, question: str) -> str:
         preview = report_text[:800].strip()
@@ -202,16 +222,29 @@ class ChatService:
         )
 
     def _stringify_state(self, state: Dict[str, Any]) -> str:
+        facts = state.get("facts") or {}
+        compact_facts = "\n".join(f"{fid}: {f['claim']}" for fid, f in facts.items() if isinstance(f, dict) and f.get("claim"))
+        summary = {
+            "meeting_playbook": state.get("meeting_playbook"),
+            "insight_synthesis": state.get("insight_synthesis"),
+            "strategic_frameworks": state.get("strategic_frameworks"),
+            "commercial_frameworks": state.get("commercial_frameworks"),
+            "financial_snapshot": state.get("financial_snapshot"),
+            "priorities_and_pain_points": state.get("priorities_and_pain_points"),
+            "service_mappings": state.get("service_mappings"),
+            "fact_index": compact_facts,
+        }
         try:
-            return json.dumps(state, default=str, ensure_ascii=False, sort_keys=True)[:20000]
+            return json.dumps(summary, default=str, ensure_ascii=False, sort_keys=True)[:20000]
         except Exception:
-            return str(state)[:20000]
+            return str(summary)[:20000]
 
     def _build_grounding_prompt(self, report_text: str, full_state_context: str, question: str) -> str:
         return (
             "You are an executive advisory assistant. Use the full deal state and the generated report as your context. "
             "Answer based on the actual workflow outputs and report contents. Do not invent missing facts. "
-            "If a fact is unclear, say so explicitly and provide the best evidence-based answer available.\n\n"
+            "If a fact is unclear, say so explicitly and provide the best evidence-based answer available. "
+            "Cite the fact IDs (e.g. [F1a2b3c]) when you state a client fact. If the answer is not in the context, say it is not covered by the research.\n\n"
             f"Deal state snapshot:\n{full_state_context[:20000]}\n\n"
             f"Generated report:\n{report_text[:12000]}\n\n"
             f"User question: {question}\n\n"

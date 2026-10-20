@@ -129,37 +129,8 @@ async def get_pipeline_state(
     if not context:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
 
-    active_state = context.get("active_state") or {}
-    ps = active_state.get("priorities_and_pain_points") or {}
-    if not isinstance(ps, dict):
-        ps = {}
-    normalized_state = {
-        "deal_id": str(deal_id),
-        "current_step": active_state.get("current_step"),
-        "execution_paused_at": active_state.get("execution_paused_at"),
-        "last_execution_resumption": active_state.get("last_execution_resumption"),
-        "pause_requested": bool(active_state.get("pause_requested", False)),
-        "manual_pause_at_node": active_state.get("manual_pause_at_node"),
-        "dynamic_instructions": active_state.get("dynamic_instructions"),
-        "mandatory_review_checkpoint": active_state.get("mandatory_review_checkpoint", "pending"),
-        "human_approved": bool(active_state.get("human_approved", False)),
-        "human_feedback": active_state.get("human_feedback"),
-        "target_company": active_state.get("target_company") or (deal.target_company if deal else None),
-        "target_industry": active_state.get("target_industry") or (deal.target_industry if deal else None),
-        "meeting_objective": active_state.get("meeting_objective") or (deal.meeting_objective if deal else None),
-        "company_overview": active_state.get("company_research"),
-        "financial_intelligence": active_state.get("financial_intelligence"),
-        "stakeholder_intelligence": active_state.get("stakeholder_intelligence"),
-        "industry_analysis": active_state.get("industry_analysis"),
-        "priorities": ps.get("priorities") or [],
-        "detected_pain_points": ps.get("pain_points") or [],
-        "service_mappings": active_state.get("service_mappings") or [],
-        "matched_internal_assets": active_state.get("matched_internal_assets") or [],
-        "cxo_executive_brief": active_state.get("cxo_executive_brief") or None,
-        "node_statuses": active_state.get("node_statuses") or {},
-        "errors": active_state.get("errors"),
-    }
-    return WorkflowStateSnapshot.model_validate(normalized_state)
+    mapped = DealService.map_state_to_api_response(context.get("active_state") or {})
+    return WorkflowStateSnapshot.model_validate(mapped)
 
 @router.post("/human-approval")          # legacy: same path
 async def submit_human_approval(

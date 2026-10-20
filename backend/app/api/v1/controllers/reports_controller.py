@@ -42,12 +42,13 @@ async def export_markdown_report(deal_id: UUID, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="Deal state not found")
 
     state = context["active_state"]
-    markdown_content = (
-        state.get("markdown_export")
-        or state.get("final_report")
-        or state.get("draft_proposal")
-        or "# Report Generation Incomplete\nThe report has not been generated yet."
-    )
+    markdown_content = state.get("markdown_export") or state.get("final_report") or state.get("draft_proposal")
+    if not markdown_content:
+        meeting_playbook = state.get("meeting_playbook") or {}
+        if meeting_playbook:
+            markdown_content = "# Executive Snapshot\n\n" + (meeting_playbook.get("executive_snapshot") or "")
+        else:
+            raise HTTPException(status_code=404, detail="No report available yet")
 
     headers = {
         "Content-Disposition": f"attachment; filename=deal_{deal_id}_strategy_brief.md"
